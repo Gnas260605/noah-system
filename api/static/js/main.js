@@ -64,7 +64,7 @@
       }
     });
 
-    function handleAction(url, label) {
+    window.handleAction = function(url, label) {
       showToast('Đang thực hiện: ' + label, 'info');
       fetch(url, { method: 'POST' })
         .then(res => res.json())

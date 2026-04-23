@@ -64,20 +64,20 @@
             <p class="text-[11px] text-slate-400 mt-1">RabbitMQ Stream</p>
         </div>
 
-        <!-- Stat: DLQ -->
-        <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow">
+        <!-- Stat: Dirty -->
+        <a href="/report" class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-all hover:-translate-y-1 block group">
             <div class="flex items-center justify-between mb-4">
                 <div class="p-2 bg-rose-50 rounded-lg">
-                    <i data-lucide="alert-circle" class="w-5 h-5 text-rose-600"></i>
+                    <i data-lucide="filter" class="w-5 h-5 text-rose-600"></i>
                 </div>
-                <span class="text-[10px] font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full uppercase">DLQ</span>
+                <span id="dirty-status-label" class="text-[10px] font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full uppercase">Quality Check</span>
             </div>
-            <h3 class="text-slate-500 text-xs font-bold uppercase tracking-wider">Thất Bại (DLQ)</h3>
+            <h3 class="text-slate-500 text-xs font-bold uppercase tracking-wider">Dữ liệu bẩn đã lọc</h3>
             <div class="mt-2 flex items-baseline gap-2">
-                <span id="stat-dlq" class="text-3xl font-extrabold text-slate-900">0</span>
+                <span id="stat-dirty" class="text-3xl font-extrabold text-slate-900">{{ snapshot.summary.dirty_count }}</span>
             </div>
-            <p class="text-[11px] text-slate-400 mt-1">Cần xử lý lại</p>
-        </div>
+            <p class="text-[11px] text-slate-400 mt-1 group-hover:text-rose-500 transition-colors">Click để xem chi tiết →</p>
+        </a>
     </div>
 
     <!-- MAIN BODY: Controls + Table -->
@@ -186,19 +186,20 @@
     // SSE Monitoring Logic
     const evtSource = new EventSource("/api/stream/dashboard");
     evtSource.onmessage = function(event) {
-        const snap = JSON.parse(event.data);
+        const data = JSON.parse(event.data);
         
         // Update Stats
-        document.getElementById('stat-mysql').innerText = snap.mysql.count.toLocaleString();
-        document.getElementById('stat-postgres').innerText = snap.postgres.count.toLocaleString();
-        document.getElementById('stat-queue').innerText = snap.queue.messages.toLocaleString();
-        document.getElementById('last-updated').innerText = snap.generated_at;
+        document.getElementById('stat-mysql').innerText    = data.mysql.count || 0;
+        document.getElementById('stat-postgres').innerText = data.postgres.count || 0;
+        document.getElementById('stat-queue').innerText    = data.queue.messages || 0;
+        document.getElementById('stat-dirty').innerText    = data.summary.dirty_count || 0;
+        document.getElementById('last-updated').innerText  = data.generated_at;
 
         // Update Table
         const tbody = document.getElementById('recent-orders-body');
         const empty = document.getElementById('empty-state');
         
-        if (!snap.sales || snap.sales.length === 0) {
+        if (!data.sales || data.sales.length === 0) {
             tbody.innerHTML = "";
             empty.style.display = 'flex';
         } else {

@@ -110,6 +110,18 @@ def get_dirty_records(limit: int = 50) -> list:
             conn.close()
 
 
+def count_dirty() -> int:
+    """Đếm số bản ghi bẩn."""
+    with _lock:
+        conn = _get_conn()
+        try:
+            return conn.execute("SELECT COUNT(*) FROM dirty_records").fetchone()[0]
+        except Exception:
+            return 0
+        finally:
+            conn.close()
+
+
 def insert_order(data: dict) -> bool:
     """
     Lưu một đơn hàng vào SQLite (idempotent qua message_id).

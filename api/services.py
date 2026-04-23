@@ -29,6 +29,7 @@ from api.db_local import (
     truncate_orders   as _sqlite_truncate,
     log_event         as _log_event,
     log_dirty         as _log_dirty,
+    count_dirty       as _sqlite_dirty_count,
 )
 
 # ─────────────────────────────────────────────────────────────
@@ -55,6 +56,17 @@ def standard_cleaner(row: dict, source: str) -> tuple[dict, bool]:
     
     # 2. Resilient translation
     try:
+        # Check for missing values before conversion
+        missing_fields = []
+        if not u_id_raw: missing_fields.append("user_id")
+        if not p_id_raw: missing_fields.append("product_id")
+        if not qty_raw:  missing_fields.append("quantity")
+        
+        # We allow total_price to be missing and recalculated later, 
+        # but let's log it if both quantity and price are missing.
+        
+        is_missing = len(missing_fields) > 0
+        
         data = {
             "user_id":    int(float(u_id_raw)) if u_id_raw else 1,
             "product_id": int(float(p_id_raw)) if p_id_raw else 1,
@@ -64,20 +76,26 @@ def standard_cleaner(row: dict, source: str) -> tuple[dict, bool]:
         
         # 3. Timestamp Fidelity: Preserve original if exists, else now()
         if time_raw:
-            # Simple normalization for standard SQL format
             data["created_at"] = str(time_raw).strip()
         else:
             data["created_at"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-        # 4. Fidelity Check: Log if data is 'dirty' (e.g. negative)
-        is_dirty = (data["quantity"] < 0 or data["total_price"] < 0)
-        if is_dirty:
-            # Log ORIGINAL values before fixing
-            _log_dirty(source, json.dumps(row), f"FIXED NEGATIVE DATA: (qty={data['quantity']}, price={data['total_price']}) converted to absolute.")
+        # 4. Fidelity Check: Log if data is 'dirty' (e.g. negative or missing)
+        is_negative = (data["quantity"] < 0 or data["total_price"] < 0)
+        
+        if is_missing or is_negative:
+            reason = ""
+            if is_missing: reason += f"MISSING FIELDS: {', '.join(missing_fields)}. "
+            if is_negative: reason += f"NEGATIVE DATA FIXED: (qty={data['quantity']}, price={data['total_price']})."
+            
+            _log_dirty(source, json.dumps(row), reason.strip())
+            
+            # Clean up for pipeline
             data["quantity"] = abs(data["quantity"])
             data["total_price"] = abs(data["total_price"])
+            return data, True # It IS dirty
             
-        return data, is_dirty
+        return data, False
         
     except (ValueError, TypeError) as e:
         _log_dirty(source, json.dumps(row), f"REJECTED: Critical numeric error ({e})")
@@ -411,8 +429,9 @@ def build_snapshot(force: bool = False) -> dict:
         "services": services,
         "trend":    trend,
         "summary":  {
-            "observed":     mysql_total,
-            "persisted":    persisted,
+            "total_synced": persisted,
+            "queue_depth":  q["messages"],
+            "dirty_count":  _sqlite_dirty_count(),
             "health_label": "Active" if (q["ok"] or LOCAL_MODE) else "Degraded",
             "health_reason":"Pipeline monitoring active",
         },

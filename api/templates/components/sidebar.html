@@ -36,14 +36,14 @@
         <section>
             <p class="nav-section-label px-3 mb-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest whitespace-nowrap transition-opacity duration-200">Data Management</p>
             <div class="space-y-1">
-                <a href="/api/ops/ingest-historical" data-method="POST" class="nav-item group flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 hover:bg-white/10" title="SQL Loader">
+                <button onclick="handleAction('/api/ops/ingest-historical', 'SQL Ingest')" class="nav-item w-full group flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 hover:bg-white/10" title="SQL Loader">
                     <i data-lucide="database" class="w-5 h-5 flex-shrink-0 transition-transform group-hover:scale-110"></i>
                     <span class="nav-text text-sm font-medium whitespace-nowrap opacity-100 transition-all duration-200">SQL Ingest</span>
-                </a>
-                <a href="/api/ops/ingest-legacy" data-method="POST" class="nav-item group flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 hover:bg-white/10" title="CSV Inventory">
+                </button>
+                <button onclick="handleAction('/api/ops/ingest-legacy', 'CSV Inventory')" class="nav-item w-full group flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 hover:bg-white/10" title="CSV Inventory">
                     <i data-lucide="file-spreadsheet" class="w-5 h-5 flex-shrink-0 transition-transform group-hover:scale-110"></i>
                     <span class="nav-text text-sm font-medium whitespace-nowrap opacity-100 transition-all duration-200">CSV Inventory</span>
-                </a>
+                </button>
             </div>
         </section>
 
