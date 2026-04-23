@@ -80,22 +80,23 @@ def standard_cleaner(row: dict, source: str) -> tuple[dict, bool]:
         else:
             data["created_at"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-        # 4. Fidelity Check: Log if data is 'dirty' (e.g. negative or missing)
+        # 4. Fidelity Check: Log if data is 'dirty' (e.g. negative or missing critical fields)
+        # For Legacy/CSV, we tolerate missing user_id (defaults to 1) without marking as 'dirty'
+        critical_missing = [f for f in missing_fields if f != "user_id"]
         is_negative = (data["quantity"] < 0 or data["total_price"] < 0)
         
-        if is_missing or is_negative:
+        # If it has negative numbers OR missing critical fields (product_id, quantity)
+        if len(critical_missing) > 0 or is_negative:
             reason = ""
-            if is_missing: reason += f"MISSING FIELDS: {', '.join(missing_fields)}. "
+            if len(critical_missing) > 0: reason += f"MISSING CRITICAL FIELDS: {', '.join(critical_missing)}. "
             if is_negative: reason += f"NEGATIVE DATA FIXED: (qty={data['quantity']}, price={data['total_price']})."
-            
-            _log_dirty(source, json.dumps(row), reason.strip())
             
             # Clean up for pipeline
             data["quantity"] = abs(data["quantity"])
             data["total_price"] = abs(data["total_price"])
-            return data, True # It IS dirty
+            return data, reason.strip() # Return reason instead of True
             
-        return data, False
+        return data, None
         
     except (ValueError, TypeError) as e:
         _log_dirty(source, json.dumps(row), f"REJECTED: Critical numeric error ({e})")
@@ -461,7 +462,7 @@ def ingest_csv(csv_path: str) -> dict:
     try:
         with open(csv_path, encoding="utf-8") as f:
             for row in csv.DictReader(f):
-                data, is_dirty = standard_cleaner(row, "CSV Ingress")
+                data, dirty_reason = standard_cleaner(row, "CSV Ingress")
                 if data is None:
                     skipped += 1
                     continue
@@ -474,15 +475,17 @@ def ingest_csv(csv_path: str) -> dict:
                 seen_ids.add(mid)
                 data["message_id"] = mid
                 items.append(data)
-                if is_dirty:
+                
+                if dirty_reason:
                     dirty += 1
+                    _log_dirty("CSV Ingress", json.dumps(row), dirty_reason)
     except Exception as e:
         return {"ok": False, "message": f"Lỗi đọc CSV: {e}"}
 
     sent, errors = enqueue_bulk(items)
     return {
         "status": "success",
-        "message": f"Ingested {sent} unique records ({dirty} corrected, {duplicated_in_file} duplicates skipped, {errors} errors).",
+        "message": f"Nạp thành công {sent} bản ghi mới ({dirty} bản ghi bẩn đã sửa, {duplicated_in_file} trùng lặp bỏ qua).",
     }
 
 
@@ -520,7 +523,7 @@ def ingest_sql(sql_path: str) -> dict:
                             "status":      m.group(5),
                             "created_at":  m.group(6),
                         }
-                        data, is_dirty = standard_cleaner(raw, "SQL Historical (6-col)")
+                        data, dirty_reason = standard_cleaner(raw, "SQL Historical (6-col)")
                         if data:
                             mid = generate_message_id(data)
                             if mid in seen_ids:
@@ -529,7 +532,9 @@ def ingest_sql(sql_path: str) -> dict:
                             seen_ids.add(mid)
                             data["message_id"] = mid
                             items.append(data)
-                            if is_dirty: dirty += 1
+                            if dirty_reason: 
+                                dirty += 1
+                                _log_dirty("SQL Ingress", json.dumps(raw), dirty_reason)
                 else:
                     # Fallback to 4-column
                     for m in v4.finditer(block):
@@ -539,7 +544,7 @@ def ingest_sql(sql_path: str) -> dict:
                             "quantity":    m.group(3),
                             "total_price": m.group(4),
                         }
-                        data, is_dirty = standard_cleaner(raw, "SQL Historical (4-col)")
+                        data, dirty_reason = standard_cleaner(raw, "SQL Historical (4-col)")
                         if data:
                             mid = generate_message_id(data)
                             if mid in seen_ids:
@@ -548,7 +553,9 @@ def ingest_sql(sql_path: str) -> dict:
                             seen_ids.add(mid)
                             data["message_id"] = mid
                             items.append(data)
-                            if is_dirty: dirty += 1
+                            if dirty_reason: 
+                                dirty += 1
+                                _log_dirty("SQL Ingress", json.dumps(raw), dirty_reason)
     except Exception as e:
         _log_event("Ingest SQL Fail", str(e))
         return {"status": "error", "message": f"Lỗi đọc SQL: {e}"}
