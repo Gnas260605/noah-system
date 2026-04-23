@@ -2,6 +2,12 @@ FROM python:3.10-slim
 WORKDIR /app
 VOLUME ["/app/data"]
 
+# Install system dependencies for Docker-out-of-Docker
+RUN apt-get update && apt-get install -y \
+    docker.io \
+    docker-compose \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install dependencies
 RUN pip install --no-cache-dir \
     flask \

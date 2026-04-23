@@ -34,8 +34,8 @@
             <div class="space-y-3">
                 {% if report.summary %}
                     {% for item in report.summary %}
-                    <div class="flex items-center justify-between">
-                        <span class="text-xs text-slate-400">{{ item.reason }}</span>
+                    <div class="flex items-center justify-between issue-item hover:bg-slate-800 p-1 rounded transition-colors">
+                        <span class="text-xs text-slate-400 reason-label">{{ item.reason }}</span>
                         <span class="px-2 py-0.5 bg-rose-500/20 text-rose-400 text-[10px] font-bold rounded">{{ item.count }}</span>
                     </div>
                     {% endfor %}
@@ -53,9 +53,15 @@
                 <h2 class="text-lg font-bold text-slate-900">Dữ Liệu Bị Từ Chối (Dirty Log)</h2>
                 <span class="px-2 py-0.5 bg-rose-50 text-rose-600 text-[10px] font-extrabold rounded-md uppercase">Top 100 Issues</span>
             </div>
-            <button onclick="location.reload()" class="p-2 hover:bg-slate-50 rounded-lg transition-colors text-slate-400">
-                <i data-lucide="refresh-cw" class="w-4 h-4"></i>
-            </button>
+            <div class="flex items-center gap-4">
+                <div class="relative">
+                    <i data-lucide="search" class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+                    <input type="text" id="dirty-search" onkeyup="filterDirtyLog()" placeholder="Lọc theo lý do hoặc ID..." class="h-10 pl-10 pr-4 w-64 rounded-xl border border-slate-100 bg-slate-50/50 text-xs font-medium focus:bg-white focus:ring-4 focus:ring-indigo-500/10 transition-all outline-none">
+                </div>
+                <button onclick="location.reload()" class="p-2 hover:bg-slate-50 rounded-lg transition-colors text-slate-400">
+                    <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                </button>
+            </div>
         </div>
 
         <div class="overflow-auto max-h-[600px]">
@@ -68,7 +74,7 @@
                         <th class="px-6 py-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Raw Data Payload</th>
                     </tr>
                 </thead>
-                <tbody class="divide-y divide-slate-50">
+                <tbody id="dirty-log-body" class="divide-y divide-slate-50">
                     {% for log in report.dirty_log %}
                     <tr class="hover:bg-rose-50/20 transition-colors">
                         <td class="px-6 py-4 text-xs font-medium text-slate-400">{{ log.created_at }}</td>
@@ -78,7 +84,7 @@
                         <td class="px-6 py-4">
                             <div class="flex items-center gap-2">
                                 <span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
-                                <span class="text-sm font-bold text-slate-700">{{ log.reason }}</span>
+                                <span class="text-sm font-bold text-slate-700 reason-text">{{ log.reason }}</span>
                             </div>
                         </td>
                         <td class="px-6 py-4 text-right">
@@ -92,7 +98,7 @@
                     </tr>
                     {% endfor %}
                     {% if not report.dirty_log %}
-                    <tr>
+                    <tr id="empty-row">
                         <td colspan="4" class="px-6 py-20 text-center">
                             <div class="flex flex-col items-center opacity-20">
                                 <i data-lucide="shield-check" class="w-12 h-12 mb-4"></i>
@@ -106,4 +112,43 @@
         </div>
     </div>
 </div>
+
+<script>
+    function filterDirtyLog(manualQuery = null) {
+        const searchInput = document.getElementById('dirty-search');
+        if (manualQuery !== null) {
+            searchInput.value = manualQuery;
+        }
+        
+        const query = searchInput.value.toLowerCase();
+        const rows = document.querySelectorAll('#dirty-log-body tr:not(#empty-row)');
+        let visibleCount = 0;
+
+        rows.forEach(row => {
+            const text = row.innerText.toLowerCase();
+            const isVisible = text.includes(query);
+            row.style.display = isVisible ? '' : 'none';
+            if (isVisible) visibleCount++;
+        });
+
+        const emptyRow = document.getElementById('empty-row');
+        if (emptyRow) {
+            emptyRow.style.display = (visibleCount === 0) ? '' : 'none';
+        }
+    }
+
+    // Gắn sự kiện click cho các lỗi phổ biến để lọc nhanh
+    document.addEventListener('DOMContentLoaded', () => {
+        const issues = document.querySelectorAll('.issue-item');
+        issues.forEach(item => {
+            item.style.cursor = 'pointer';
+            item.addEventListener('click', () => {
+                const reason = item.querySelector('.reason-label').innerText;
+                filterDirtyLog(reason);
+                // Scroll to table
+                document.getElementById('dirty-search').scrollIntoView({ behavior: 'smooth', block: 'center' });
+            });
+        });
+    });
+</script>
 {% endblock %}

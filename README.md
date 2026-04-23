@@ -109,7 +109,37 @@ noah-system/
 
 ---
 
+---
+
+## 🔧 Troubleshooting: worker logs empty
+
+Nếu bạn chạy `docker logs -f noah-worker` mà không thấy gì (mặc dù container vẫn đang chạy), đó là do cơ chế **Python stdout buffering**.
+
+**Cách khắc phục:**
+1.  Đảm bảo trong `docker-compose.yml` đã có biến môi trường `PYTHONUNBUFFERED: "1"`.
+2.  Chạy lệnh sau để khởi động lại và áp dụng cấu hình:
+    ```bash
+    docker-compose up -d --build
+    ```
+3.  Kiểm tra lại log:
+    ```bash
+    docker logs -f noah-worker
+    ```
+
+---
+1. Khi bạn tắt "Producer System" hoặc "Legacy Reader":
+Kết quả: Hệ thống chỉ đơn giản là ngừng tạo ra các đơn hàng giả lập tự động.
+Tác động: Bình thường. Bạn vẫn có thể nạp dữ liệu thủ công bằng nút "SQL Ingest" hoặc "CSV Inventory". Việc tắt Producer thường được làm khi bạn muốn kiểm tra dữ liệu thật mà không bị các đơn hàng ảo làm nhiễu.
+2. Khi bạn tắt "Worker Service":
+Kết quả: Các đơn hàng (từ Producer hoặc từ file nạp vào) sẽ không được ghi vào Database ngay lập tức.
+Tác động: An toàn (Không mất dữ liệu). RabbitMQ sẽ đóng vai trò là "bộ nhớ đệm". Các đơn hàng sẽ nằm chờ sẵn trong hàng đợi (Queue).
+Khi bật lại: Ngay khi bạn bật lại Worker, nó sẽ "ngốn" sạch các tin nhắn đang chờ trong hàng đợi và cập nhật đầy đủ vào Database. Bạn sẽ thấy số lượng bản ghi tăng vọt lên để bắt kịp dữ liệu.
+3. Khi bạn tắt API Dashboard (api container):
+Kết quả: Bạn không thể truy cập giao diện web.
+Tác động: Các dịch vụ ngầm vẫn chạy. Worker vẫn tiếp tục xử lý đơn hàng từ Producer và lưu vào DB bình thường. Khi bạn bật lại API, bạn sẽ thấy dữ liệu đã được cập nhật xong xuôi.
+Tóm lại: Hệ thống của bạn có tính kháng lỗi (Resilience) rất cao. Bạn có thể tự do bật/tắt các thành phần để quan sát luồng dữ liệu mà không sợ làm mất dữ liệu hay gây crash toàn bộ hệ thống. Đó chính là ưu điểm lớn nhất của việc sử dụng RabbitMQ làm trung gian.
 ## 👥 Thông tin nhóm thực hiện
+
 
 *   **Nhóm:** Team 1
 *   **Môn học:** CMUCS 445 - Platform Integration Systems

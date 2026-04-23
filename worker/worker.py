@@ -161,9 +161,19 @@ def run_worker():
             time.sleep(5)
 
 if __name__ == "__main__":
-    # Periodic stats print
     import threading
+    import requests
+
+    API_URL = os.getenv("API_URL", "http://api:5000")
+
+    def log_to_api(event, message):
+        try:
+            requests.post(f"{API_URL}/api/ops/log-event", json={"event": event, "message": message}, timeout=1)
+        except:
+            pass
+
     def print_stats():
+        last_processed = 0
         while True:
             print(f"\n--- [Pipeline Metrics] ---")
             print(f"SUCCESS: {stats['processed']}")
@@ -171,9 +181,17 @@ if __name__ == "__main__":
             print(f"RETRIES: {stats['retries']}")
             print(f"FAILED: {stats['failed']}")
             print(f"--------------------------\n")
+            
+            # Log to API if there's progress
+            if stats['processed'] > last_processed:
+                diff = stats['processed'] - last_processed
+                log_to_api("Worker Sync", f"Đã xử lý thêm {diff} đơn hàng thành công vào Database.")
+                last_processed = stats['processed']
+            
             time.sleep(30)
     
     t = threading.Thread(target=print_stats, daemon=True)
     t.start()
     
+    log_to_api("Worker Start", "Worker service đã khởi động và đang lắng nghe hàng đợi...")
     run_worker()

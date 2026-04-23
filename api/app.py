@@ -136,7 +136,7 @@ def stream_dashboard():
                 snapshot = build_snapshot()
                 data = _serialize(snapshot)
                 yield f"data: {data}\n\n"
-                time.sleep(1.0)
+                time.sleep(0.5)
         except GeneratorExit:
             # Client disconnected
             pass
@@ -227,32 +227,7 @@ def pipeline_page():
     )
 
 
-@app.route("/send-order", methods=["GET", "POST"])
-def send_order_form():
-    if request.method == "POST":
-        try:
-            uid   = int(request.form.get("user_id")   or random.randint(100, 999))
-            pid   = int(request.form.get("product_id") or random.randint(100, 200))
-            qty   = int(request.form.get("quantity")   or 1)
-            price = float(request.form.get("total_price") or qty * 150_000)
-            data  = _make_order(uid, pid, qty, price)
-            enqueue(data)
-            return redirect(url_for(
-                "send_order_form",
-                status="success",
-                message=f"Đã gửi đơn P#{pid} vào queue",
-            ))
-        except Exception as e:
-            return redirect(url_for("send_order_form", status="error", message=str(e)))
 
-    return render_template(
-        "pages/send_order.html",
-        page_title="Gửi Đơn Hàng",
-        current_page="send_order",
-        local_mode=LOCAL_MODE,
-        toast_type=request.args.get("status", ""),
-        toast_message=request.args.get("message", ""),
-    )
 
 
 # ─────────────────────────────────────────────────────────────
@@ -319,29 +294,43 @@ def bulk_orders():
 @app.route("/api/ops/ingest-legacy", methods=["POST"])
 @app.route("/api/ops/ingest-csv", methods=["POST"])
 def ops_ingest_csv():
-    # Correct path to root directory
-    base_dir = os.path.dirname(os.path.dirname(__file__))
-    csv_path = os.path.join(base_dir, "legacy", "inventory.csv")
-    result = ingest_csv(csv_path)
-    if result["status"] == "success":
-        # invalidate snapshot cache
-        from api.services import _snap_lock
-        import api.services as svc
-        with _snap_lock:
-            svc._snap_cache = None
-        return _ok(result["message"])
-    return _err(result["message"])
+    try:
+        _log_event("CSV Ingest", "Bắt đầu nạp dữ liệu từ inventory.csv...")
+        # Correct path to root directory
+        base_dir = os.path.dirname(os.path.dirname(__file__))
+        csv_path = os.path.join(base_dir, "legacy", "inventory.csv")
+        result = ingest_csv(csv_path)
+        if result["status"] == "success":
+            _log_event("CSV Success", result["message"])
+            # invalidate snapshot cache
+            from api.services import _snap_lock
+            import api.services as svc
+            with _snap_lock:
+                svc._snap_cache = None
+            return _ok(result["message"])
+        _log_event("CSV Fail", result["message"])
+        return _err(result["message"])
+    except Exception as e:
+        _log_event("CSV Error", str(e))
+        return _err(f"Lỗi không xác định khi nạp CSV: {str(e)}")
 
 
 @app.route("/api/ops/ingest-historical", methods=["POST"])
 @app.route("/api/ops/ingest-sql", methods=["POST"])
 def ops_ingest_historical():
-    base_dir = os.path.dirname(os.path.dirname(__file__))
-    sql_path = os.path.join(base_dir, "db", "init.sql")
-    result = ingest_sql(sql_path)
-    if result["status"] == "success":
-        return _ok(result["message"])
-    return _err(result["message"])
+    try:
+        _log_event("SQL Ingest", "Bắt đầu nạp dữ liệu từ init.sql...")
+        base_dir = os.path.dirname(os.path.dirname(__file__))
+        sql_path = os.path.join(base_dir, "db", "init.sql")
+        result = ingest_sql(sql_path)
+        if result["status"] == "success":
+            _log_event("SQL Success", result["message"])
+            return _ok(result["message"])
+        _log_event("SQL Fail", result["message"])
+        return _err(result["message"])
+    except Exception as e:
+        _log_event("SQL Error", str(e))
+        return _err(f"Lỗi không xác định khi nạp SQL: {str(e)}")
 
 
 @app.route("/api/ops/purge-queue", methods=["POST"])
@@ -353,95 +342,79 @@ def ops_purge_queue():
 
 
 # ─────────────────────────────────────────────────────────────
-#  Service Management API (Docker Compose Bridge)
+#  Service Management API (Docker Bridge)
 # ─────────────────────────────────────────────────────────────
 @app.route("/api/ops/service-status", methods=["GET"])
 def ops_service_status():
-    """Returns the running status of dockerized services."""
+    """Checks the running status of docker containers."""
     try:
-        # Use absolute path to project root for docker-compose
-        root_dir = os.path.dirname(os.path.dirname(__file__))
-        result = subprocess.run(
-            ["docker-compose", "ps", "--format", "json"],
-            cwd=root_dir, capture_output=True, text=True, check=True
-        )
-        
-        # Parse docker-compose ps --format json (lines of JSON objects in older version or array in newer)
-        raw = result.stdout.strip()
-        if not raw:
-            return _ok("Services Offline", data={"worker": False, "producer": False})
-        
-        # Robust parsing for different docker-compose versions
+        # Use direct docker inspect for container names
+        containers = ["noah-worker", "noah-producer", "noah-legacy"]
         statuses = {"worker": False, "producer": False, "legacy": False}
         
-        try:
-            items = json.loads(raw)
-            if not isinstance(items, list): items = [items]
-        except:
-            # Fallback for line-separated JSON objects
-            items = []
-            for line in raw.split("\n"):
-                if line.strip():
-                    try: items.append(json.loads(line))
-                    except: pass
-
-        for item in items:
-            # Handle variations in 'docker-compose ps' output keys (Service vs Name)
-            service = item.get("Service") or item.get("Name", "")
-            state = item.get("State") or item.get("Status", "")
-            is_running = any(x in state.lower() for x in ["up", "running", "active"])
-            
-            # Lowercase for matching
-            s_low = service.lower()
-            if "worker"   in s_low: statuses["worker"]   = is_running
-            if "producer" in s_low: statuses["producer"] = is_running
-            if "legacy"   in s_low: statuses["legacy"]   = is_running
-            
+        for c_name in containers:
+            try:
+                result = subprocess.run(
+                    ["docker", "inspect", "-f", "{{.State.Running}}", c_name],
+                    capture_output=True, text=True
+                )
+                is_running = "true" in result.stdout.lower()
+                
+                if "worker" in c_name: statuses["worker"] = is_running
+                if "producer" in c_name: statuses["producer"] = is_running
+                if "legacy" in c_name: statuses["legacy"] = is_running
+            except:
+                pass # Container might not exist yet
+                
         return _ok("Status fetched", data=statuses)
     except Exception as e:
-        # Fallback if docker-compose is not reachable
         return _err(f"Docker control error: {str(e)}")
 
 
 @app.route("/api/ops/service-toggle", methods=["POST"])
 def ops_service_toggle():
-    """Starts or stops a specific docker service."""
+    """Starts or stops a specific docker container."""
     body = request.get_json(silent=True) or {}
-    service_name = body.get("service") # "worker" or "producer"
-    action = body.get("action")       # "start" or "stop"
+    service_name = body.get("service")
+    action = body.get("action")
     
     if service_name not in ["worker", "producer", "legacy"]:
         return _err("Invalid service name")
     
-    # Internal map to docker-compose service names
-    service_map = {"worker": "worker", "producer": "producer", "legacy": "legacy"}
-    target = service_map[service_name]
+    container_map = {
+        "worker": "noah-worker",
+        "producer": "noah-producer",
+        "legacy": "noah-legacy"
+    }
+    target = container_map[service_name]
     
     try:
-        root_dir = os.path.dirname(os.path.dirname(__file__))
-        # Execute command in background thread to avoid timeout
+        # Execute direct docker command (start/stop)
         def run_docker_task():
-            subprocess.run(["docker-compose", action, target], cwd=root_dir)
+            subprocess.run(["docker", action, target])
         
         threading.Thread(target=run_docker_task, daemon=True).start()
-        return _ok(f"Đã gửi lệnh {action} tới hệ thống {service_name}...")
+        return _ok(f"Đã gửi lệnh {action} tới container {target}...")
     except Exception as e:
         return _err(str(e))
 
 
 @app.route("/api/ops/wipe-databases", methods=["POST"])
 def ops_wipe_databases():
-    # Support both old and new confirmation styles
-    body = request.get_json(silent=True) or {}
-    if body.get("confirm") != "WIPE":
-        return _err("Cần xác nhận trong payload: { 'confirm': 'WIPE' }")
-    result = wipe_all()
-    if result["status"] == "success":
-        import api.services as svc
-        from api.services import _snap_lock
-        with _snap_lock: svc._snap_cache = None
-        return _ok(result["message"])
-    return _err(result["message"])
+    try:
+        # Support both old and new confirmation styles
+        body = request.get_json(silent=True) or {}
+        if body.get("confirm") != "WIPE":
+            return _err("Cần xác nhận trong payload: { 'confirm': 'WIPE' }")
+        result = wipe_all()
+        if result["status"] == "success":
+            import api.services as svc
+            from api.services import _snap_lock
+            with _snap_lock: svc._snap_cache = None
+            return _ok(result["message"])
+        return _err(result["message"])
+    except Exception as e:
+        return _err(f"Lỗi khi thực hiện xoá database: {str(e)}")
 
 
 @app.route("/api/ops/database-explorer")
@@ -450,7 +423,15 @@ def api_db_explorer():
     limit = min(int(request.args.get("limit", 100)), 100) # Strict safety limit
     offset = int(request.args.get("offset", 0))
 
-    res = query_table(table, limit, offset)
+    if table == "mysql_orders":
+        from api.services import query_mysql_table
+        res = query_mysql_table("orders", limit, offset)
+    elif table == "postgres_transactions":
+        from api.services import query_postgres_table
+        res = query_postgres_table("transactions", limit, offset)
+    else:
+        res = query_table(table, limit, offset)
+    
     if "error" in res:
         return _err(res["error"])
     
@@ -469,8 +450,21 @@ def api_db_explorer():
 
 @app.route("/api/ops/database-tables")
 def api_db_tables():
+    from api.db_local import get_tables
     tables = get_tables()
+    # Add Business DB options
+    tables.append("mysql_orders")
+    tables.append("postgres_transactions")
     return _ok("Tables loaded", tables)
+
+
+@app.route("/api/ops/log-event", methods=["POST"])
+def log_event_api():
+    body = request.get_json(silent=True) or {}
+    event = body.get("event", "External Event")
+    message = body.get("message", "")
+    _log_event(event, message)
+    return _ok("Event logged")
 
 
 @app.route("/api/ops/worker-logs")

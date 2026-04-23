@@ -273,13 +273,56 @@ def _fetch_pg_count() -> dict:
         return {"ok": False, "count": 0}
 
 
+def query_mysql_table(table_name: str, limit: int = 100, offset: int = 0) -> dict:
+    """Paginated generic query for MySQL."""
+    try:
+        import mysql.connector
+        conn = mysql.connector.connect(**MYSQL_CONFIG)
+        cur = conn.cursor(dictionary=True)
+        if not re.match(r'^\w+$', table_name): return {"error": "Invalid table"}
+        
+        cur.execute(f"SELECT * FROM {table_name} LIMIT %s OFFSET %s", (limit, offset))
+        rows = cur.fetchall()
+        cols = [d[0] for d in cur.description] if cur.description else []
+        
+        cur.execute(f"SELECT COUNT(*) AS c FROM {table_name}")
+        total = cur.fetchone()["c"]
+        
+        cur.close(); conn.close()
+        return {"columns": cols, "rows": rows, "total": total}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def query_postgres_table(table_name: str, limit: int = 100, offset: int = 0) -> dict:
+    """Paginated generic query for PostgreSQL."""
+    try:
+        import psycopg2
+        import psycopg2.extras
+        conn = psycopg2.connect(**POSTGRES_CONFIG)
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        if not re.match(r'^\w+$', table_name): return {"error": "Invalid table"}
+        
+        cur.execute(f"SELECT * FROM {table_name} LIMIT %s OFFSET %s", (limit, offset))
+        rows = [dict(r) for r in cur.fetchall()]
+        cols = [d[0] for d in cur.description] if cur.description else []
+        
+        cur.execute(f"SELECT COUNT(*) FROM {table_name}")
+        total = cur.fetchone()[0]
+        
+        cur.close(); conn.close()
+        return {"columns": cols, "rows": rows, "total": total}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # ─────────────────────────────────────────────────────────────
 #  Snapshot cache (ttl 4s)
 # ─────────────────────────────────────────────────────────────
 _snap_cache:  dict | None = None
 _snap_time:   float = 0
 _snap_lock    = threading.Lock()
-CACHE_TTL     = 4  # seconds
+CACHE_TTL     = 0.5  # seconds (ultra-fast for real-time feel)
 
 
 def build_snapshot(force: bool = False) -> dict:

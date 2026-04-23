@@ -250,16 +250,20 @@
         }
     }
 
-    function confirmWipe() {
+    async function confirmWipe() {
         if (confirm("CẢNH BÁO: Hành động này sẽ xoá SẠCH toàn bộ dữ liệu. Bạn có chắc chắn?")) {
-            fetch('/api/ops/wipe-databases', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ confirm: 'WIPE' })
-            }).then(r => r.json()).then(res => {
+            try {
+                const r = await fetch('/api/ops/wipe-databases', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ confirm: 'WIPE' })
+                });
+                const res = await r.json();
                 showToast(res.message, res.status);
                 if(res.status === 'success') setTimeout(() => location.reload(), 1500);
-            });
+            } catch (e) {
+                showToast("Lỗi kết nối server khi xoá dữ liệu", "error");
+            }
         }
     }
 </script>

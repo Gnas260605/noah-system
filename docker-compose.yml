@@ -139,7 +139,10 @@ services:
       POSTGRES_DB:       finance
       POSTGRES_USER:     postgres
       POSTGRES_PASSWORD: root
+      PYTHONUNBUFFERED:  "1"
+      TZ:                Asia/Ho_Chi_Minh
     volumes:
+      - /var/run/docker.sock:/var/run/docker.sock  # Control host docker from inside
       - noah_data:/app/data                      # SQLite persistence
       - ./legacy/inventory.csv:/app/legacy/inventory.csv  # Historical CSV
       - ./db/init.sql:/app/db/init.sql                     # Historical SQL
@@ -168,6 +171,8 @@ services:
       POSTGRES_DB:       finance
       POSTGRES_USER:     postgres
       POSTGRES_PASSWORD: root
+      PYTHONUNBUFFERED:  "1"
+      TZ:                Asia/Ho_Chi_Minh
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -187,6 +192,8 @@ services:
       RABBITMQ_HOST:  rabbitmq
       RABBITMQ_QUEUE: orders
       SEND_INTERVAL:  "1.0"
+      PYTHONUNBUFFERED:  "1"
+      TZ:                Asia/Ho_Chi_Minh
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -200,6 +207,8 @@ services:
     container_name: noah-legacy
     environment:
       RABBITMQ_HOST: rabbitmq
+      PYTHONUNBUFFERED:  "1"
+      TZ:                Asia/Ho_Chi_Minh
     volumes:
       - ./legacy:/app
     depends_on:

@@ -6,8 +6,12 @@
     <!-- Header -->
     <div class="flex items-end justify-between">
         <div>
-            <h1 class="text-3xl font-extrabold text-slate-900 tracking-tight">Database Explorer</h1>
-            <p class="text-slate-500 mt-1">Truy vấn trực tiếp dữ liệu từ các bảng trong hệ thống.</p>
+            <h1 class="text-3xl font-extrabold text-slate-900 tracking-tight">System Explorer</h1>
+            <p class="text-slate-500 mt-1">Truy vấn trực tiếp nhật ký hệ thống và dữ liệu thô từ SQLite (Internal DB).</p>
+            <div class="mt-2 flex items-center gap-2">
+                <span class="px-2 py-0.5 bg-blue-50 text-blue-600 text-[10px] font-bold rounded uppercase border border-blue-100">Metadata Only</span>
+                <p class="text-[10px] text-slate-400 italic">* Lưu ý: Bảng "Orders" ở đây chỉ dùng cho Local Mode. Dữ liệu chính nằm trong MySQL/Postgres.</p>
+            </div>
         </div>
         <div class="flex gap-3">
            <select id="table-selector" onchange="loadTable()" class="h-11 px-6 rounded-xl border border-slate-200 bg-white shadow-sm font-bold text-sm text-slate-700 outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all"></select>
@@ -45,7 +49,7 @@
 </div>
 
 <script>
-    let currentTable = 'orders';
+    let currentTable = 'system_logs';
     let currentOffset = 0;
     const limit = 100;
 
@@ -60,7 +64,11 @@
                     opt.innerText = t.charAt(0).toUpperCase() + t.slice(1);
                     selector.appendChild(opt);
                 });
+                selector.value = 'system_logs';
                 loadTable();
+            })
+            .catch(e => {
+                showToast("Lỗi tải danh sách bảng", "error");
             });
     }
 
@@ -127,6 +135,10 @@
                 } else {
                     showToast(res.message, 'error');
                 }
+            })
+            .catch(e => {
+                showToast("Lỗi kết nối server khi tải bảng", "error");
+                console.error(e);
             });
     }
 
