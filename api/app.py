@@ -42,6 +42,10 @@ from api.services import (
     get_heal_history,
     get_heal_summary,
     fetch_dirty_records,
+<<<<<<< HEAD
+=======
+    replay_dlq,
+>>>>>>> main
 )
 from api.db_local import (
     get_tables, query_table,
@@ -531,6 +535,18 @@ def api_heal_status():
     summary["current_diff"] = diff
     summary["needs_heal"] = diff > 0
     return _ok("Heal status", summary)
+<<<<<<< HEAD
+=======
+
+
+@app.route("/api/ops/replay-dlq", methods=["POST"])
+def ops_replay_dlq():
+    """Di chuyển tin nhắn từ DLQ về queue chính."""
+    result = replay_dlq()
+    if result["status"] == "success":
+        return _ok(result["message"])
+    return _json_resp(result["status"], result["message"])
+>>>>>>> main
 
 
 if __name__ == "__main__":

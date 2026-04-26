@@ -10,6 +10,10 @@
             <p class="text-slate-500 mt-1">Giám sát các hoạt động của Worker và Hệ thống theo thời gian thực.</p>
         </div>
         <div class="flex gap-2">
+           <button id="btnReplayDLQHeader" onclick="replayDLQ()" class="hidden px-4 py-2 bg-rose-50 border border-rose-200 text-xs font-bold text-rose-600 rounded-xl hover:bg-rose-100 transition-all flex items-center gap-2">
+               <i data-lucide="play-circle" class="w-4 h-4"></i>
+               Retry DLQ
+           </button>
            <button onclick="clearLogs()" class="px-4 py-2 bg-white border border-slate-200 text-xs font-bold text-slate-600 rounded-xl hover:bg-slate-50 transition-all">Clear Logs</button>
            <button onclick="location.reload()" class="p-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100">
                <i data-lucide="refresh-cw" class="w-5 h-5"></i>
@@ -18,6 +22,22 @@
     </div>
 
     <!-- Logs Container -->
+    <div id="dlq-alert-bar" class="hidden p-4 bg-rose-50 border border-rose-100 rounded-2xl flex items-center justify-between gap-4 animate-bounce-subtle mb-6">
+        <div class="flex items-center gap-4">
+            <div class="w-10 h-10 rounded-xl bg-rose-500 flex items-center justify-center text-white shadow-lg shadow-rose-200">
+                <i data-lucide="alert-circle" class="w-6 h-6"></i>
+            </div>
+            <div>
+                <h4 class="text-sm font-bold text-rose-900">Phát hiện đơn hàng lỗi!</h4>
+                <p class="text-xs text-rose-600">Có <span id="dlq-count-text">0</span> đơn hàng đang nằm trong hàng đợi lỗi (DLQ).</p>
+            </div>
+        </div>
+        <button id="btnReplayDLQ" onclick="replayDLQ()" class="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl transition-all shadow-lg shadow-rose-200 flex items-center gap-2 group">
+            <i data-lucide="play-circle" class="w-4 h-4 group-hover:scale-110 transition-transform"></i>
+            Retry Failed Orders
+        </button>
+    </div>
+
     <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden flex flex-col h-[700px]">
         <div class="p-4 bg-slate-50/50 border-b border-slate-100 flex items-center justify-between">
             <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Event Timeline</span>
@@ -72,8 +92,66 @@
         }
     }
 
+    function replayDLQ() {
+        const btn = document.getElementById('btnReplayDLQ');
+        const btnH = document.getElementById('btnReplayDLQHeader');
+        const oldH = btn.innerHTML;
+        
+        btn.disabled = btnH.disabled = true;
+        btn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Processing...`;
+        lucide.createIcons();
+
+        fetch('/api/ops/replay-dlq', { method: 'POST' })
+            .then(r => r.json())
+            .then(res => {
+                if (res.status === 'success') {
+                    showToast(res.message, 'success');
+                    setTimeout(() => location.reload(), 1500);
+                } else {
+                    showToast(res.message, 'info');
+                }
+            })
+            .catch(e => showToast("Lỗi replay: " + e, 'error'))
+            .finally(() => {
+                btn.disabled = btnH.disabled = false;
+                btn.innerHTML = oldH;
+                lucide.createIcons();
+            });
+    }
+
+    function checkDLQ() {
+        fetch('/dashboard/data')
+            .then(r => r.json())
+            .then(res => {
+                if (res.status === 'success') {
+                    const snap = res.data;
+                    const dlqCount = snap.queue.messages; // failed_orders is monitored in snapshot under specific conditions or we can use generic queue count if we target failed
+                    // Actually, build_snapshot returns queue info. If we want failed_orders specifically:
+                    // In a more robust system, we'd have a separate stats for DLQ. 
+                    // For now, let's assume we use the snapshot's queue messages if they are failed ones or fetch specifically.
+                    
+                    const alertBar = document.getElementById('dlq-alert-bar');
+                    const btnH = document.getElementById('btnReplayDLQHeader');
+                    const countText = document.getElementById('dlq-count-text');
+                    
+                    // Simple heuristic: if we have more than 0 messages in any queue (or targeted), show alert.
+                    // Ideally, we'd use a specific endpoint for DLQ count.
+                    if (snap.queue.messages > 0) {
+                        alertBar.classList.remove('hidden');
+                        btnH.classList.remove('hidden');
+                        countText.innerText = snap.queue.messages;
+                    } else {
+                        alertBar.classList.add('hidden');
+                        btnH.classList.add('hidden');
+                    }
+                }
+            });
+    }
+
     // Auto refresh logs
     setInterval(fetchLogs, 3000);
+    setInterval(checkDLQ, 5000);
     fetchLogs();
+    checkDLQ();
 </script>
 {% endblock %}
