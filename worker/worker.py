@@ -115,12 +115,67 @@ def callback(ch, method, properties, body):
             ch.basic_ack(delivery_tag=method.delivery_tag)
         else:
             # Route to DLX natively
-            print(f"[FAILED] Poison Message: {data.get('message_id', 'UNKNOWN')}")
+            msg_id = data.get('message_id', 'unknown')
+            print(f"[FAILED] Poison Message: {msg_id}")
             stats["failed"] += 1
-            # basic_nack with requeue=False routes it straight to the declared DLX
+            
+            # --- BẮT ĐẦU: GHI VÀO DIRTY LOG KHI DỮ LIỆU BỊ TỪ CHỐI ---
+            if _worker and hasattr(_worker, 'mysql_conn') and _worker.mysql_conn:
+                try:
+                    cur = _worker.mysql_conn.cursor()
+                    cur.execute("""
+                        CREATE TABLE IF docker stop noah-producerNOT EXISTS dirty_log (
+                            id INT AUTO_INCREMENT PRIMARY KEY,
+                            transaction_id VARCHAR(255),
+                            reason TEXT,
+                            raw_payload TEXT,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        )
+                    """)
+                    cur.execute(
+                        "INSERT INTO dirty_log (transaction_id, reason, raw_payload) VALUES (%s, %s, %s)",
+                        (msg_id, "Validation failed / Poison Message", body.decode('utf-8', errors='replace'))
+                    )
+                    _worker.mysql_conn.commit()
+                    cur.close()
+                    print(f">>> Đã lưu thành công ID {msg_id} vào Dirty Log!")
+                except Exception as db_err:
+                    print(f"Lỗi khi lưu DB dirty_log: {db_err}")
+            # --- KẾT THÚC: GHI VÀO DIRTY LOG ---
+
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
     except Exception as e:
         print(f"Critical callback error: {e}")
+        
+        msg_id = "unknown"
+        try:
+            parsed = json.loads(body)
+            if isinstance(parsed, dict):
+                msg_id = parsed.get("message_id", "unknown")
+        except Exception:
+            pass
+
+        if _worker and _worker.mysql_conn:
+            try:
+                cur = _worker.mysql_conn.cursor()
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS dirty_log (
+                        id INT AUTO_INCREMENT PRIMARY KEY, 
+                        transaction_id VARCHAR(255), 
+                        reason TEXT, 
+                        raw_payload TEXT, 
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                cur.execute(
+                    "INSERT INTO dirty_log (transaction_id, reason, raw_payload) VALUES (%s, %s, %s)",
+                    (msg_id, str(e), body.decode('utf-8', errors='replace'))
+                )
+                _worker.mysql_conn.commit()
+                cur.close()
+            except Exception as db_err:
+                print(f"Failed to insert dirty_log: {db_err}")
+
         ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
 
 def run_worker():
@@ -161,19 +216,9 @@ def run_worker():
             time.sleep(5)
 
 if __name__ == "__main__":
+    # Periodic stats print
     import threading
-    import requests
-
-    API_URL = os.getenv("API_URL", "http://api:5000")
-
-    def log_to_api(event, message):
-        try:
-            requests.post(f"{API_URL}/api/ops/log-event", json={"event": event, "message": message}, timeout=1)
-        except:
-            pass
-
     def print_stats():
-        last_processed = 0
         while True:
             print(f"\n--- [Pipeline Metrics] ---")
             print(f"SUCCESS: {stats['processed']}")
@@ -181,17 +226,9 @@ if __name__ == "__main__":
             print(f"RETRIES: {stats['retries']}")
             print(f"FAILED: {stats['failed']}")
             print(f"--------------------------\n")
-            
-            # Log to API if there's progress
-            if stats['processed'] > last_processed:
-                diff = stats['processed'] - last_processed
-                log_to_api("Worker Sync", f"Đã xử lý thêm {diff} đơn hàng thành công vào Database.")
-                last_processed = stats['processed']
-            
             time.sleep(30)
     
     t = threading.Thread(target=print_stats, daemon=True)
     t.start()
     
-    log_to_api("Worker Start", "Worker service đã khởi động và đang lắng nghe hàng đợi...")
     run_worker()

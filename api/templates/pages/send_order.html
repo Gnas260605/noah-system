@@ -1,0 +1,83 @@
+{% extends 'layouts/base.html' %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto py-12 animate-in slide-in-from-bottom-5 duration-700">
+    
+    <!-- Form Card -->
+    <div class="bg-white rounded-[32px] shadow-2xl shadow-indigo-100 border border-slate-100 overflow-hidden">
+        <div class="p-10 bg-gradient-to-br from-indigo-600 to-violet-700 text-white relative">
+            <div class="relative z-10">
+                <div class="w-16 h-16 bg-white/20 backdrop-blur-xl rounded-2xl flex items-center justify-center mb-6">
+                    <i data-lucide="package-plus" class="w-8 h-8 text-white"></i>
+                </div>
+                <h1 class="text-3xl font-extrabold tracking-tight">Gửi Đơn Thủ Công</h1>
+                <p class="text-indigo-100 mt-2 font-medium">Bơm trực tiếp một đơn hàng vào hệ thống pipeline.</p>
+            </div>
+            <!-- Decorative circle -->
+            <div class="absolute -top-10 -right-10 w-40 h-40 bg-white/10 rounded-full blur-3xl"></div>
+        </div>
+
+        <form action="/send-order" method="POST" class="p-10 space-y-8">
+            <div class="grid grid-cols-2 gap-6">
+                <div class="space-y-2">
+                    <label class="block text-[11px] font-bold text-slate-400 uppercase tracking-widest pl-1">Mã Khách Hàng</label>
+                    <div class="relative">
+                        <i data-lucide="user" class="absolute left-4 top-3.5 w-5 h-5 text-slate-400"></i>
+                        <input type="number" name="user_id" placeholder="VD: 101" class="w-full h-12 pl-12 pr-4 rounded-2xl border border-slate-200 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all outline-none font-semibold">
+                    </div>
+                </div>
+                <div class="space-y-2">
+                    <label class="block text-[11px] font-bold text-slate-400 uppercase tracking-widest pl-1">Mã Sản Phẩm</label>
+                    <div class="relative">
+                        <i data-lucide="box" class="absolute left-4 top-3.5 w-5 h-5 text-slate-400"></i>
+                        <input type="number" name="product_id" placeholder="VD: 50" class="w-full h-12 pl-12 pr-4 rounded-2xl border border-slate-200 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all outline-none font-semibold">
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-6">
+                <div class="space-y-2">
+                    <label class="block text-[11px] font-bold text-slate-400 uppercase tracking-widest pl-1">Số Lượng</label>
+                    <div class="relative">
+                        <i data-lucide="hash" class="absolute left-4 top-3.5 w-5 h-5 text-slate-400"></i>
+                        <input type="number" name="quantity" value="1" min="1" class="w-full h-12 pl-12 pr-4 rounded-2xl border border-slate-200 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all outline-none font-semibold">
+                    </div>
+                </div>
+                <div class="space-y-2">
+                    <label class="block text-[11px] font-bold text-slate-400 uppercase tracking-widest pl-1">Tổng Giá Trị</label>
+                    <div class="relative">
+                        <i data-lucide="banknote" class="absolute left-4 top-3.5 w-5 h-5 text-indigo-500"></i>
+                        <input type="number" name="total_price" placeholder="VD: 150000" class="w-full h-12 pl-12 pr-4 rounded-2xl border border-slate-200 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all outline-none font-semibold">
+                    </div>
+                </div>
+            </div>
+
+            <div class="pt-4">
+                <button type="submit" class="w-full h-14 bg-slate-900 hover:bg-black text-white rounded-2xl font-black text-lg shadow-2xl shadow-indigo-200 flex items-center justify-center gap-3 transition-all active:scale-[0.98]">
+                    Gửi Đơn Hàng
+                    <i data-lucide="arrow-right" class="w-6 h-6 text-indigo-400"></i>
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Info Box -->
+    <div class="mt-8 p-6 bg-amber-50 border border-amber-100 rounded-2xl flex items-start gap-4">
+        <i data-lucide="info" class="w-6 h-6 text-amber-500 flex-shrink-0"></i>
+        <div class="text-sm text-amber-800 leading-relaxed">
+            <p class="font-bold mb-1">Cơ chế hàng đợi:</p>
+            Đơn hàng sau khi gửi sẽ được đóng gói dưới dạng Message và đẩy vào RabbitMQ. Worker sẽ tự động đồng bộ sang cơ sở dữ liệu tài chính trong giây lát.
+        </div>
+    </div>
+</div>
+
+<script>
+    // Handle toast from redirect
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.has('status')) {
+        showToast(urlParams.get('message'), urlParams.get('status'));
+        // Clean URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+    }
+</script>
+{% endblock %}

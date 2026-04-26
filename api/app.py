@@ -38,11 +38,14 @@ from api.services import (
     ingest_sql,
     wipe_all,
     purge_queue,
+    run_auto_heal,
+    get_heal_history,
+    get_heal_summary,
+    fetch_dirty_records,
 )
 from api.db_local import (
-    get_tables, query_table, 
-    get_system_logs, get_dirty_records,
-    log_event as _log_event
+    get_tables, query_table,
+    get_system_logs, log_event as _log_event
 )
 
 app = Flask(__name__)
@@ -136,7 +139,7 @@ def stream_dashboard():
                 snapshot = build_snapshot()
                 data = _serialize(snapshot)
                 yield f"data: {data}\n\n"
-                time.sleep(0.5)
+                time.sleep(1.0)
         except GeneratorExit:
             # Client disconnected
             pass
@@ -153,7 +156,7 @@ def report_page():
     synced_pct     = round(min(mysql_count, postgres_count) / max_c * 100, 1)
 
     # Lấy dữ liệu bẩn thực tế
-    dirty_records = get_dirty_records(100)
+    dirty_records = fetch_dirty_records(100)
     
     # Tính toán thống kê lỗi (Top issues)
     issue_counts = {}
@@ -198,6 +201,8 @@ def report_data():
     max_c          = max(mysql_count, postgres_count, 1)
     synced_pct     = round(min(mysql_count, postgres_count) / max_c * 100, 1)
     
+    dirty_records = fetch_dirty_records(100)
+    
     data = {
         "generated_at":   snap["generated_at"],
         "status":         "OK" if diff == 0 else "MISMATCH",
@@ -205,7 +210,7 @@ def report_data():
         "postgres_count": postgres_count,
         "diff":           diff,
         "dlq_count":      0,
-        "dirty_log":      [],
+        "dirty_log":      dirty_records,
         "reconciliation": {
             "synced_pct": synced_pct,
             "result":     f"Orders DB={mysql_count}, Finance DB={postgres_count}, Diff={diff}",
@@ -227,7 +232,32 @@ def pipeline_page():
     )
 
 
+@app.route("/send-order", methods=["GET", "POST"])
+def send_order_form():
+    if request.method == "POST":
+        try:
+            uid   = int(request.form.get("user_id")   or random.randint(100, 999))
+            pid   = int(request.form.get("product_id") or random.randint(100, 200))
+            qty   = int(request.form.get("quantity")   or 1)
+            price = float(request.form.get("total_price") or qty * 150_000)
+            data  = _make_order(uid, pid, qty, price)
+            enqueue(data)
+            return redirect(url_for(
+                "send_order_form",
+                status="success",
+                message=f"Đã gửi đơn P#{pid} vào queue",
+            ))
+        except Exception as e:
+            return redirect(url_for("send_order_form", status="error", message=str(e)))
 
+    return render_template(
+        "pages/send_order.html",
+        page_title="Gửi Đơn Hàng",
+        current_page="send_order",
+        local_mode=LOCAL_MODE,
+        toast_type=request.args.get("status", ""),
+        toast_message=request.args.get("message", ""),
+    )
 
 
 # ─────────────────────────────────────────────────────────────
@@ -285,6 +315,11 @@ def bulk_orders():
     thread.daemon = True
     thread.start()
     
+    # [REAL-TIME] Invalidate cache immediately to show progress start
+    import api.services as svc
+    from api.services import _snap_lock
+    with _snap_lock: svc._snap_cache = None
+        
     return _ok(f"Bắt đầu bơm siêu tốc {count} đơn hàng (Chạy ngầm)...", data={"status": "started", "count": count})
 
 
@@ -294,43 +329,33 @@ def bulk_orders():
 @app.route("/api/ops/ingest-legacy", methods=["POST"])
 @app.route("/api/ops/ingest-csv", methods=["POST"])
 def ops_ingest_csv():
-    try:
-        _log_event("CSV Ingest", "Bắt đầu nạp dữ liệu từ inventory.csv...")
-        # Correct path to root directory
-        base_dir = os.path.dirname(os.path.dirname(__file__))
-        csv_path = os.path.join(base_dir, "legacy", "inventory.csv")
-        result = ingest_csv(csv_path)
-        if result["status"] == "success":
-            _log_event("CSV Success", result["message"])
-            # invalidate snapshot cache
-            from api.services import _snap_lock
-            import api.services as svc
-            with _snap_lock:
-                svc._snap_cache = None
-            return _ok(result["message"])
-        _log_event("CSV Fail", result["message"])
-        return _err(result["message"])
-    except Exception as e:
-        _log_event("CSV Error", str(e))
-        return _err(f"Lỗi không xác định khi nạp CSV: {str(e)}")
+    # Correct path to root directory
+    base_dir = os.path.dirname(os.path.dirname(__file__))
+    csv_path = os.path.join(base_dir, "legacy", "inventory.csv")
+    result = ingest_csv(csv_path)
+    if result["status"] == "success":
+        # invalidate snapshot cache
+        from api.services import _snap_lock
+        import api.services as svc
+        with _snap_lock:
+            svc._snap_cache = None
+        return _ok(result["message"])
+    return _err(result["message"])
 
 
 @app.route("/api/ops/ingest-historical", methods=["POST"])
 @app.route("/api/ops/ingest-sql", methods=["POST"])
 def ops_ingest_historical():
-    try:
-        _log_event("SQL Ingest", "Bắt đầu nạp dữ liệu từ init.sql...")
-        base_dir = os.path.dirname(os.path.dirname(__file__))
-        sql_path = os.path.join(base_dir, "db", "init.sql")
-        result = ingest_sql(sql_path)
-        if result["status"] == "success":
-            _log_event("SQL Success", result["message"])
-            return _ok(result["message"])
-        _log_event("SQL Fail", result["message"])
-        return _err(result["message"])
-    except Exception as e:
-        _log_event("SQL Error", str(e))
-        return _err(f"Lỗi không xác định khi nạp SQL: {str(e)}")
+    base_dir = os.path.dirname(os.path.dirname(__file__))
+    sql_path = os.path.join(base_dir, "db", "init.sql")
+    result = ingest_sql(sql_path)
+    if result["status"] == "success":
+        # [REAL-TIME] Invalidate cache
+        import api.services as svc
+        from api.services import _snap_lock
+        with _snap_lock: svc._snap_cache = None
+        return _ok(result["message"])
+    return _err(result["message"])
 
 
 @app.route("/api/ops/purge-queue", methods=["POST"])
@@ -342,79 +367,89 @@ def ops_purge_queue():
 
 
 # ─────────────────────────────────────────────────────────────
-#  Service Management API (Docker Bridge)
+#  Service Management API (Docker Compose Bridge - DooD)
 # ─────────────────────────────────────────────────────────────
+def run_docker_compose(cmd_list):
+    """Helper to run docker compose commands within the project context."""
+    try:
+        # Intelligent path detection
+        if os.path.exists("/app/docker-compose.yml"):
+            root_dir = "/app"
+        else:
+            root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            
+        compose_file = os.path.join(root_dir, "docker-compose.yml")
+        
+        # LOG FOR TRANSPARENCY: User will see this in their Terminal
+        full_command = ["docker", "compose", "-f", compose_file] + cmd_list
+        print(f"[DOCKER_CONTROL] Executing: {' '.join(full_command)}")
+        
+        try:
+            # Try Docker Compose V2 (Plugin)
+            result = subprocess.run(full_command, cwd=root_dir, capture_output=True, text=True, check=True)
+            return True, result.stdout.strip()
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            # Fallback to Docker Compose V1 (Hyphenated)
+            full_command_v1 = ["docker-compose", "-f", compose_file] + cmd_list
+            print(f"[DOCKER_CONTROL] V2 failed, trying V1: {' '.join(full_command_v1)}")
+            result = subprocess.run(full_command_v1, cwd=root_dir, capture_output=True, text=True, check=True)
+            return True, result.stdout.strip()
+
+    except Exception as e:
+        error_msg = getattr(e, 'stderr', str(e))
+        print(f"[DOCKER_CONTROL] FAILED: {error_msg}")
+        return False, f"Docker CLI Error: {error_msg.strip()}"
+
 @app.route("/api/ops/service-status", methods=["GET"])
 def ops_service_status():
-    """Checks the running status of docker containers."""
-    try:
-        # Use direct docker inspect for container names
-        containers = ["noah-worker", "noah-producer", "noah-legacy"]
-        statuses = {"worker": False, "producer": False, "legacy": False}
-        
-        for c_name in containers:
-            try:
-                result = subprocess.run(
-                    ["docker", "inspect", "-f", "{{.State.Running}}", c_name],
-                    capture_output=True, text=True
-                )
-                is_running = "true" in result.stdout.lower()
-                
-                if "worker" in c_name: statuses["worker"] = is_running
-                if "producer" in c_name: statuses["producer"] = is_running
-                if "legacy" in c_name: statuses["legacy"] = is_running
-            except:
-                pass # Container might not exist yet
-                
-        return _ok("Status fetched", data=statuses)
-    except Exception as e:
-        return _err(f"Docker control error: {str(e)}")
+    """Returns the running status of dockerized services using docker compose ps."""
+    statuses = {"worker": False, "producer": False, "legacy": False}
+    
+    for svc in statuses.keys():
+        # --status running -q returns the container ID if running, empty if not
+        success, output = run_docker_compose(["ps", svc, "--status", "running", "-q"])
+        if success and output:
+            statuses[svc] = True
+            
+    return _ok("Status fetched", data=statuses)
 
 
 @app.route("/api/ops/service-toggle", methods=["POST"])
 def ops_service_toggle():
-    """Starts or stops a specific docker container."""
+    """Starts or stops a specific docker service."""
     body = request.get_json(silent=True) or {}
     service_name = body.get("service")
-    action = body.get("action")
+    action = body.get("action")       # "start" or "stop"
     
     if service_name not in ["worker", "producer", "legacy"]:
-        return _err("Invalid service name")
+        return _err("Dịch vụ không hợp lệ")
     
-    container_map = {
-        "worker": "noah-worker",
-        "producer": "noah-producer",
-        "legacy": "noah-legacy"
-    }
-    target = container_map[service_name]
+    # Map 'start'/'stop' to docker compose commands
+    if action not in ["start", "stop", "restart"]:
+        return _err("Hành động không hợp lệ")
+
+    def run_toggle():
+        run_docker_compose([action, service_name])
     
-    try:
-        # Execute direct docker command (start/stop)
-        def run_docker_task():
-            subprocess.run(["docker", action, target])
-        
-        threading.Thread(target=run_docker_task, daemon=True).start()
-        return _ok(f"Đã gửi lệnh {action} tới container {target}...")
-    except Exception as e:
-        return _err(str(e))
+    # Run in background to prevent UI block/timeout
+    threading.Thread(target=run_toggle, daemon=True).start()
+    
+    return _ok(f"Đã gửi lệnh {action} tới hệ thống {service_name}...")
 
 
 @app.route("/api/ops/wipe-databases", methods=["POST"])
 def ops_wipe_databases():
-    try:
-        # Support both old and new confirmation styles
-        body = request.get_json(silent=True) or {}
-        if body.get("confirm") != "WIPE":
-            return _err("Cần xác nhận trong payload: { 'confirm': 'WIPE' }")
-        result = wipe_all()
-        if result["status"] == "success":
-            import api.services as svc
-            from api.services import _snap_lock
-            with _snap_lock: svc._snap_cache = None
-            return _ok(result["message"])
-        return _err(result["message"])
-    except Exception as e:
-        return _err(f"Lỗi khi thực hiện xoá database: {str(e)}")
+    # Support both old and new confirmation styles
+    body = request.get_json(silent=True) or {}
+    if body.get("confirm") != "WIPE":
+        return _err("Cần xác nhận trong payload: { 'confirm': 'WIPE' }")
+    result = wipe_all()
+    if result["status"] == "success":
+        import api.services as svc
+        from api.services import _snap_lock
+        with _snap_lock: svc._snap_cache = None
+        return _ok(result["message"])
+    return _err(result["message"])
 
 
 @app.route("/api/ops/database-explorer")
@@ -423,15 +458,7 @@ def api_db_explorer():
     limit = min(int(request.args.get("limit", 100)), 100) # Strict safety limit
     offset = int(request.args.get("offset", 0))
 
-    if table == "mysql_orders":
-        from api.services import query_mysql_table
-        res = query_mysql_table("orders", limit, offset)
-    elif table == "postgres_transactions":
-        from api.services import query_postgres_table
-        res = query_postgres_table("transactions", limit, offset)
-    else:
-        res = query_table(table, limit, offset)
-    
+    res = query_table(table, limit, offset)
     if "error" in res:
         return _err(res["error"])
     
@@ -450,21 +477,8 @@ def api_db_explorer():
 
 @app.route("/api/ops/database-tables")
 def api_db_tables():
-    from api.db_local import get_tables
     tables = get_tables()
-    # Add Business DB options
-    tables.append("mysql_orders")
-    tables.append("postgres_transactions")
     return _ok("Tables loaded", tables)
-
-
-@app.route("/api/ops/log-event", methods=["POST"])
-def log_event_api():
-    body = request.get_json(silent=True) or {}
-    event = body.get("event", "External Event")
-    message = body.get("message", "")
-    _log_event(event, message)
-    return _ok("Event logged")
 
 
 @app.route("/api/ops/worker-logs")
@@ -474,7 +488,49 @@ def api_worker_logs():
 
 @app.route("/api/ops/dirty-data")
 def api_dirty_data():
-    return _ok("Dirty data loaded", get_dirty_records(100))
+    return _ok("Dirty data loaded", fetch_dirty_records(100))
+
+
+# ─────────────────────────────────────────────────────────────
+#  Module 2: Auto-Healing API
+# ─────────────────────────────────────────────────────────────
+
+@app.route("/api/ops/auto-heal", methods=["POST"])
+def api_auto_heal():
+    """Kích hoạt một chu kỳ auto-heal ngay lập tức."""
+    try:
+        result = run_auto_heal()
+        status = result.get("status", "ok")
+        if status == "error":
+            return _err(f"Heal thất bại: {result.get('error', 'unknown')}", result)
+        msg = (
+            f"Heal hoàn tất: phát hiện {result.get('total_diff',0)} lệch, "
+            f"đã sửa {result.get('total_healed',0)} bản ghi, "
+            f"{result.get('errors',0)} lỗi."
+        )
+        return _ok(msg, result)
+    except Exception as e:
+        return _err(f"Lỗi auto-heal: {e}")
+
+
+@app.route("/api/ops/heal-log", methods=["GET"])
+def api_heal_log():
+    """Lịch sử các chu kỳ heal gần nhất."""
+    limit = min(int(request.args.get("limit", 20)), 100)
+    history = get_heal_history(limit)
+    summary = get_heal_summary()
+    return _ok("Heal log loaded", {"summary": summary, "history": history})
+
+
+@app.route("/api/ops/heal-status", methods=["GET"])
+def api_heal_status():
+    """Trạng thái tổng hợp của hệ thống heal."""
+    summary = get_heal_summary()
+    snap = build_snapshot()
+    diff = abs(snap["mysql"]["count"] - snap["postgres"]["count"])
+    summary["current_diff"] = diff
+    summary["needs_heal"] = diff > 0
+    return _ok("Heal status", summary)
 
 
 if __name__ == "__main__":

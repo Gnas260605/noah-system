@@ -64,7 +64,7 @@
       }
     });
 
-    window.handleAction = function(url, label) {
+    function handleAction(url, label) {
       showToast('Đang thực hiện: ' + label, 'info');
       fetch(url, { method: 'POST' })
         .then(res => res.json())
@@ -127,10 +127,15 @@
       .then(res => res.json())
       .then(data => {
         if (data.status === 'success') {
+          showToast(data.message || 'Thành công!', 'success');
           setTimeout(updateServiceStatus, 2000);
         } else {
-          showToast(data.message, 'error');
+          // Show real error from Docker CLI (if any)
+          showToast(data.message || 'Lỗi không xác định', 'error');
         }
+      })
+      .catch(err => {
+        showToast('Lỗi kết nối: ' + err, 'error');
       });
     };
 
