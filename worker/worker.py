@@ -124,7 +124,7 @@ def callback(ch, method, properties, body):
                 try:
                     cur = _worker.mysql_conn.cursor()
                     cur.execute("""
-                        CREATE TABLE IF docker stop noah-producerNOT EXISTS dirty_log (
+                        CREATE TABLE IF NOT EXISTS dirty_log (
                             id INT AUTO_INCREMENT PRIMARY KEY,
                             transaction_id VARCHAR(255),
                             reason TEXT,

@@ -29,34 +29,13 @@ from api.db_local import (
     truncate_orders     as _sqlite_truncate,
     log_event           as _log_event,
     log_dirty           as _log_dirty,
-<<<<<<< HEAD
     log_heal_cycle      as _log_heal_cycle,
     get_heal_log        as _get_heal_log,
     get_heal_stats      as _get_heal_stats_db,
     simulate_local_heal as _simulate_local_heal,
-=======
-    # Heal logic imports removed because user said no change to db_local.py
-    # We will implement these locally in this file for now to avoid crashes.
->>>>>>> main
+
     get_dirty_records   as _sqlite_get_dirty_records,
 )
-
-# ─────────────────────────────────────────────────────────────
-#  Heal Logic Helpers (Inlined to avoid changing db_local.py)
-# ─────────────────────────────────────────────────────────────
-def _log_heal_cycle(result: dict):
-    # Stub for now since we can't change db_local.py
-    pass
-
-def _get_heal_log(limit: int = 20) -> list:
-    return []
-
-def _get_heal_stats_db() -> dict:
-    return {"cycles": 0, "total_detected": 0, "total_healed_pg": 0, "total_healed_mysql": 0, "total_errors": 0, "last_run": "Chưa chạy"}
-
-def _simulate_local_heal() -> dict:
-    return {"started_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "finished_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "total_diff": 0, "total_healed": 0, "status": "ok"}
-
 
 # ─────────────────────────────────────────────────────────────
 #  Helpers
@@ -689,10 +668,6 @@ def get_heal_summary() -> dict:
         "total_errors":        db_stats.get("total_errors", 0),
         "last_run":            db_stats.get("last_run", "Chưa chạy"),
     }
-<<<<<<< HEAD
-=======
-
-
 def replay_dlq() -> dict:
     """
     DLQ Replay: Di chuyển tin nhắn từ failed_orders quay lại orders queue.
@@ -743,4 +718,4 @@ def replay_dlq() -> dict:
             
     except Exception as e:
         return {"status": "error", "message": f"Lỗi Replay DLQ: {str(e)}"}
->>>>>>> main
+

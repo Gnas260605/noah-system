@@ -24,6 +24,13 @@ RABBITMQ_API_URL  = os.getenv("RABBITMQ_API_URL",  f"http://{RABBITMQ_HOST}:1567
 RABBITMQ_USER     = os.getenv("RABBITMQ_USER",     "guest")
 RABBITMQ_PASSWORD = os.getenv("RABBITMQ_PASSWORD", "guest")
 
+RABBITMQ_CONFIG = {
+    "host":     RABBITMQ_HOST,
+    "user":     RABBITMQ_USER,
+    "password": RABBITMQ_PASSWORD,
+    "url":      f"amqp://{RABBITMQ_USER}:{RABBITMQ_PASSWORD}@{RABBITMQ_HOST}:5672//"
+}
+
 # ── Database Configs ──────────────────────────────────────────
 MYSQL_CONFIG = {
     "host":     os.getenv("MYSQL_HOST",     "localhost" if LOCAL_MODE else "mysql"),

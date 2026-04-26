@@ -42,13 +42,10 @@ from api.services import (
     get_heal_history,
     get_heal_summary,
     fetch_dirty_records,
-<<<<<<< HEAD
-=======
     replay_dlq,
->>>>>>> main
 )
 from api.db_local import (
-    get_tables, query_table,
+    get_tables, query_table, log_audit,
     get_system_logs, log_event as _log_event
 )
 
@@ -434,9 +431,57 @@ def ops_service_toggle():
 
     # Run synchronously to ensure execution in gevent environment
     # Most docker commands here are fast enough
-    run_docker_compose([action, service_name])
+    success, output = run_docker_compose([action, service_name])
     
-    return _ok(f"Đã thực hiện lệnh {action} tới hệ thống {service_name}...")
+    if success:
+        log_audit("Service Toggle", f"{service_name}/{action}", "success")
+        return _ok(f"Đã thực hiện lệnh {action} tới hệ thống {service_name}...")
+    else:
+        log_audit("Service Toggle", f"{service_name}/{action}", "failed")
+        return _err(f"Lỗi khi thực hiện {action} {service_name}: {output}")
+
+
+@app.route("/api/health", methods=["GET"])
+def health_check():
+    """Module 5: System Health Check."""
+    health = {
+        "mysql": False,
+        "postgres": False,
+        "rabbitmq": False,
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+    }
+    
+    # Check MySQL
+    from api.config import MYSQL_CONFIG, POSTGRES_CONFIG
+    try:
+        import mysql.connector
+        m_conn = mysql.connector.connect(**MYSQL_CONFIG)
+        m_conn.ping(reconnect=True)
+        m_conn.close()
+        health["mysql"] = True
+    except Exception: pass
+
+    # Check PG
+    try:
+        import psycopg2
+        p_conn = psycopg2.connect(**POSTGRES_CONFIG)
+        p_conn.close()
+        health["postgres"] = True
+    except Exception: pass
+
+    # Check Rabbit
+    try:
+        import pika
+        from api.config import RABBITMQ_CONFIG
+        params = pika.ConnectionParameters(host=RABBITMQ_CONFIG["host"], socket_timeout=2)
+        r_conn = pika.BlockingConnection(params)
+        r_conn.close()
+        health["rabbitmq"] = True
+    except Exception as e:
+        print(f"[HEALTH_CHECK] RabbitMQ failed: {e}")
+
+    status_code = 200 if all(health.values()) else 503
+    return jsonify({"status": "healthy" if status_code == 200 else "degraded", "details": health}), status_code
 
 
 @app.route("/api/ops/wipe-databases", methods=["POST"])
@@ -533,10 +578,6 @@ def api_heal_status():
     summary["current_diff"] = diff
     summary["needs_heal"] = diff > 0
     return _ok("Heal status", summary)
-<<<<<<< HEAD
-=======
-
-
 @app.route("/api/ops/replay-dlq", methods=["POST"])
 def ops_replay_dlq():
     """Di chuyển tin nhắn từ DLQ về queue chính."""
@@ -544,7 +585,7 @@ def ops_replay_dlq():
     if result["status"] == "success":
         return _ok(result["message"])
     return _json_resp(result["status"], result["message"])
->>>>>>> main
+
 
 
 if __name__ == "__main__":

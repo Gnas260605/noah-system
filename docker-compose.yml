@@ -70,7 +70,7 @@ services:
       dockerfile: Dockerfile
     container_name: noah-api
     ports:
-      - "5005:5000"
+      - "5000:5000"
     environment:
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_QUEUE: orders
@@ -88,6 +88,10 @@ services:
       ENVIRONMENT: docker
       TZ: Asia/Ho_Chi_Minh
     volumes:
+      - ./api:/app/api
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./docker-compose.yml:/app/docker-compose.yml
+      - ./worker:/app/worker
       - noah_data:/app/data # SQLite persistence
       - ./legacy/inventory.csv:/app/legacy/inventory.csv # Historical CSV
       - ./db/init.sql:/app/db/init.sql # Historical SQL

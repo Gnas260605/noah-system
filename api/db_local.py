@@ -74,6 +74,17 @@ def init_db():
                 created_at     TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now','localtime'))
             )
         """)
+        # Table Audit Trail (Module 4)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                user       TEXT DEFAULT 'Admin',
+                action     TEXT NOT NULL,
+                target     TEXT,
+                status     TEXT,
+                created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now','localtime'))
+            )
+        """)
         conn.commit()
         conn.close()
 
@@ -97,6 +108,20 @@ def log_dirty(source: str, payload: str, reason: str):
             conn.execute(
                 "INSERT INTO dirty_records (source, payload, reason) VALUES (?, ?, ?)",
                 (source, payload, reason)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def log_audit(action: str, target: str = "", status: str = "success", user: str = "Admin"):
+    """Ghi nhật ký tác động người dùng (Module 4)."""
+    with _lock:
+        conn = _get_conn()
+        try:
+            conn.execute(
+                "INSERT INTO audit_log (user, action, target, status) VALUES (?, ?, ?, ?)",
+                (user, action, target, status)
             )
             conn.commit()
         finally:
