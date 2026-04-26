@@ -5,63 +5,6 @@
 
 services:
 
-  # ── Kong Database (Postgres) ─────────────────────────────────────────────
-  kong-db:
-    image: postgres:14
-    container_name: noah-kong-db
-    environment:
-      POSTGRES_DB:       kong
-      POSTGRES_USER:     kong
-      POSTGRES_PASSWORD: kong
-    healthcheck:
-      test:     ["CMD-SHELL", "pg_isready -U kong -d kong"]
-      interval: 5s
-      timeout:  5s
-      retries:  10
-    restart: unless-stopped
-
-  # ── Kong Migrations ───────────────────────────────────────────────────────
-  kong-migration:
-    image: kong:3.6
-    container_name: noah-kong-migration
-    command: kong migrations bootstrap
-    environment:
-      KONG_DATABASE:    postgres
-      KONG_PG_HOST:     kong-db
-      KONG_PG_USER:     kong
-      KONG_PG_PASSWORD: kong
-    depends_on:
-      kong-db:
-        condition: service_healthy
-    restart: on-failure
-
-  # ── Kong API Gateway ──────────────────────────────────────────────────────
-  kong:
-    image: kong:3.6
-    container_name: noah-kong
-    ports:
-      - "8000:8000"   # Proxy port (send requests through here)
-      - "8001:8001"   # Admin API (configure Kong)
-    environment:
-      KONG_DATABASE:           postgres
-      KONG_PG_HOST:            kong-db
-      KONG_PG_USER:            kong
-      KONG_PG_PASSWORD:        kong
-      KONG_PROXY_ACCESS_LOG:   /dev/stdout
-      KONG_ADMIN_ACCESS_LOG:   /dev/stdout
-      KONG_PROXY_ERROR_LOG:    /dev/stderr
-      KONG_ADMIN_ERROR_LOG:    /dev/stderr
-      KONG_ADMIN_LISTEN:       0.0.0.0:8001
-    depends_on:
-      kong-migration:
-        condition: service_completed_successfully
-    restart: unless-stopped
-    healthcheck:
-      test:     ["CMD", "kong", "health"]
-      interval: 10s
-      timeout:  5s
-      retries:  10
-
   # ── RabbitMQ Message Broker ───────────────────────────────────────────────
   rabbitmq:
     image: rabbitmq:3-management
@@ -72,6 +15,7 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
+      TZ: Asia/Ho_Chi_Minh
     healthcheck:
       test:     ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 5s
@@ -86,6 +30,7 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE:      ecommerce
+      TZ:                  Asia/Ho_Chi_Minh
     ports:
       - "3307:3306"
     volumes:
@@ -105,6 +50,7 @@ services:
     environment:
       POSTGRES_PASSWORD: root
       POSTGRES_DB:       finance
+      TZ:                Asia/Ho_Chi_Minh
     ports:
       - "5432:5432"
     volumes:
@@ -124,7 +70,7 @@ services:
       dockerfile: Dockerfile
     container_name: noah-api
     ports:
-      - "5000:5000"
+      - "5005:5000"
     environment:
       RABBITMQ_HOST:     rabbitmq
       RABBITMQ_QUEUE:    orders
@@ -139,13 +85,15 @@ services:
       POSTGRES_DB:       finance
       POSTGRES_USER:     postgres
       POSTGRES_PASSWORD: root
-      PYTHONUNBUFFERED:  "1"
+      ENVIRONMENT:       docker
       TZ:                Asia/Ho_Chi_Minh
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock  # Control host docker from inside
       - noah_data:/app/data                      # SQLite persistence
       - ./legacy/inventory.csv:/app/legacy/inventory.csv  # Historical CSV
       - ./db/init.sql:/app/db/init.sql                     # Historical SQL
+      - /var/run/docker.sock:/var/run/docker.sock          # Access to Docker daemon
+      - ./docker-compose.yml:/app/docker-compose.yml:ro    # Compose context
+      - ./worker:/app/worker                               # Access to auto_healer module
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -171,7 +119,7 @@ services:
       POSTGRES_DB:       finance
       POSTGRES_USER:     postgres
       POSTGRES_PASSWORD: root
-      PYTHONUNBUFFERED:  "1"
+      ENVIRONMENT:       docker
       TZ:                Asia/Ho_Chi_Minh
     depends_on:
       rabbitmq:
@@ -192,8 +140,7 @@ services:
       RABBITMQ_HOST:  rabbitmq
       RABBITMQ_QUEUE: orders
       SEND_INTERVAL:  "1.0"
-      PYTHONUNBUFFERED:  "1"
-      TZ:                Asia/Ho_Chi_Minh
+      TZ:             Asia/Ho_Chi_Minh
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -207,14 +154,39 @@ services:
     container_name: noah-legacy
     environment:
       RABBITMQ_HOST: rabbitmq
-      PYTHONUNBUFFERED:  "1"
-      TZ:                Asia/Ho_Chi_Minh
+      TZ:            Asia/Ho_Chi_Minh
     volumes:
       - ./legacy:/app
     depends_on:
       rabbitmq:
         condition: service_healthy
     restart: "no"
+
+
+  # ── Auto-Healer (Module 2: Messaging & Consistency) ──────────────────────
+  auto_healer:
+    build:
+      context:    ./worker
+      dockerfile: Dockerfile.healer
+    container_name: noah-auto-healer
+    environment:
+      MYSQL_HOST:             mysql
+      MYSQL_USER:             root
+      MYSQL_PASSWORD:         root
+      MYSQL_DATABASE:         ecommerce
+      POSTGRES_HOST:          postgres
+      POSTGRES_DB:            finance
+      POSTGRES_USER:          postgres
+      POSTGRES_PASSWORD:      root
+      HEAL_INTERVAL_SECONDS:  "60"   # chạy heal mỗi 60 giây
+      HEAL_BATCH_LIMIT:       "500"  # tối đa 500 bản ghi mỗi chu kỳ
+      TZ:                     Asia/Ho_Chi_Minh
+    depends_on:
+      mysql:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: always
 
 ##############################################################################
 volumes:

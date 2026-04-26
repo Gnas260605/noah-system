@@ -11,29 +11,34 @@ RABBITMQ_API_URL  = os.getenv("RABBITMQ_API_URL",  f"http://{RABBITMQ_HOST}:1567
 RABBITMQ_USER     = os.getenv("RABBITMQ_USER",     "guest")
 RABBITMQ_PASSWORD = os.getenv("RABBITMQ_PASSWORD", "guest")
 
-# ── Local mode detection ─────────────────────────────────────
-# Nếu RABBITMQ_HOST là localhost → chạy local, kết nối qua Port Map của Docker
-LOCAL_DEV = (RABBITMQ_HOST in ("localhost", "127.0.0.1"))
+# ── Environment Detection ───────────────────────────────────
+# "docker" means we are inside the container network.
+# "local" (default) means we are running on the host machine.
+ENVIRONMENT = os.getenv("ENVIRONMENT", "local").lower()
+LOCAL_MODE  = (ENVIRONMENT != "docker")
 
-# ── MySQL ─────────────────────────────────────────────────────
+# ── RabbitMQ ──────────────────────────────────────────────────
+RABBITMQ_HOST     = os.getenv("RABBITMQ_HOST",     "localhost" if LOCAL_MODE else "rabbitmq")
+RABBITMQ_QUEUE    = os.getenv("RABBITMQ_QUEUE",    "orders")
+RABBITMQ_API_URL  = os.getenv("RABBITMQ_API_URL",  f"http://{RABBITMQ_HOST}:15672/api")
+RABBITMQ_USER     = os.getenv("RABBITMQ_USER",     "guest")
+RABBITMQ_PASSWORD = os.getenv("RABBITMQ_PASSWORD", "guest")
+
+# ── Database Configs ──────────────────────────────────────────
 MYSQL_CONFIG = {
-    "host":     os.getenv("MYSQL_HOST",     "localhost" if LOCAL_DEV else "mysql"),
-    "port":     int(os.getenv("MYSQL_PORT", 3307 if LOCAL_DEV else 3306)),
+    "host":     os.getenv("MYSQL_HOST",     "localhost" if LOCAL_MODE else "mysql"),
+    "port":     int(os.getenv("MYSQL_PORT", 3307 if LOCAL_MODE else 3306)),
     "user":     os.getenv("MYSQL_USER",     "root"),
     "password": os.getenv("MYSQL_PASSWORD", "root"),
     "database": os.getenv("MYSQL_DATABASE", "ecommerce"),
     "connection_timeout": 5,
 }
 
-# ── PostgreSQL ────────────────────────────────────────────────
 POSTGRES_CONFIG = {
-    "host":            os.getenv("POSTGRES_HOST",     "localhost" if LOCAL_DEV else "postgres"),
+    "host":            os.getenv("POSTGRES_HOST",     "localhost" if LOCAL_MODE else "postgres"),
     "port":            int(os.getenv("POSTGRES_PORT", 5432)),
     "database":        os.getenv("POSTGRES_DB",       "finance"),
     "user":            os.getenv("POSTGRES_USER",     "postgres"),
     "password":        os.getenv("POSTGRES_PASSWORD", "root"),
     "connect_timeout": 5,
 }
-
-# Preserve OLD LOCAL_MODE toggle for internal services logic
-LOCAL_MODE = os.getenv("FORCE_SQLITE", "false").lower() == "true"
