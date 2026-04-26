@@ -29,8 +29,15 @@ from api.db_local import (
     truncate_orders     as _sqlite_truncate,
     log_event           as _log_event,
     log_dirty           as _log_dirty,
+<<<<<<< HEAD
+    log_heal_cycle      as _log_heal_cycle,
+    get_heal_log        as _get_heal_log,
+    get_heal_stats      as _get_heal_stats_db,
+    simulate_local_heal as _simulate_local_heal,
+=======
     # Heal logic imports removed because user said no change to db_local.py
     # We will implement these locally in this file for now to avoid crashes.
+>>>>>>> main
     get_dirty_records   as _sqlite_get_dirty_records,
 )
 
@@ -314,49 +321,6 @@ def _fetch_pg_count() -> dict:
         return {"ok": True, "count": count}
     except Exception:
         return {"ok": False, "count": 0}
-
-
-def query_mysql_table(table_name: str, limit: int = 100, offset: int = 0) -> dict:
-    """Paginated generic query for MySQL."""
-    try:
-        import mysql.connector
-        conn = mysql.connector.connect(**MYSQL_CONFIG)
-        cur = conn.cursor(dictionary=True)
-        if not re.match(r'^\w+$', table_name): return {"error": "Invalid table"}
-        
-        cur.execute(f"SELECT * FROM {table_name} LIMIT %s OFFSET %s", (limit, offset))
-        rows = cur.fetchall()
-        cols = [d[0] for d in cur.description] if cur.description else []
-        
-        cur.execute(f"SELECT COUNT(*) AS c FROM {table_name}")
-        total = cur.fetchone()["c"]
-        
-        cur.close(); conn.close()
-        return {"columns": cols, "rows": rows, "total": total}
-    except Exception as e:
-        return {"error": str(e)}
-
-
-def query_postgres_table(table_name: str, limit: int = 100, offset: int = 0) -> dict:
-    """Paginated generic query for PostgreSQL."""
-    try:
-        import psycopg2
-        import psycopg2.extras
-        conn = psycopg2.connect(**POSTGRES_CONFIG)
-        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        if not re.match(r'^\w+$', table_name): return {"error": "Invalid table"}
-        
-        cur.execute(f"SELECT * FROM {table_name} LIMIT %s OFFSET %s", (limit, offset))
-        rows = [dict(r) for r in cur.fetchall()]
-        cols = [d[0] for d in cur.description] if cur.description else []
-        
-        cur.execute(f"SELECT COUNT(*) FROM {table_name}")
-        total = cur.fetchone()[0]
-        
-        cur.close(); conn.close()
-        return {"columns": cols, "rows": rows, "total": total}
-    except Exception as e:
-        return {"error": str(e)}
 
 
 # ─────────────────────────────────────────────────────────────
@@ -725,6 +689,8 @@ def get_heal_summary() -> dict:
         "total_errors":        db_stats.get("total_errors", 0),
         "last_run":            db_stats.get("last_run", "Chưa chạy"),
     }
+<<<<<<< HEAD
+=======
 
 
 def replay_dlq() -> dict:
@@ -777,3 +743,4 @@ def replay_dlq() -> dict:
             
     except Exception as e:
         return {"status": "error", "message": f"Lỗi Replay DLQ: {str(e)}"}
+>>>>>>> main

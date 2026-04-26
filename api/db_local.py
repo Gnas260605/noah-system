@@ -59,6 +59,21 @@ def init_db():
                 created_at TEXT    DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now','localtime'))
             )
         """)
+        # Table Lịch sử Auto-Healing
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS heal_log (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                cycle_started  TEXT NOT NULL,
+                cycle_finished TEXT,
+                detected       INTEGER DEFAULT 0,
+                healed_pg      INTEGER DEFAULT 0,
+                healed_mysql   INTEGER DEFAULT 0,
+                errors         INTEGER DEFAULT 0,
+                status         TEXT DEFAULT 'ok',
+                detail_json    TEXT,
+                created_at     TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now','localtime'))
+            )
+        """)
         conn.commit()
         conn.close()
 
@@ -106,18 +121,6 @@ def get_dirty_records(limit: int = 50) -> list:
         try:
             rows = conn.execute("SELECT * FROM dirty_records ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
             return [dict(r) for r in rows]
-        finally:
-            conn.close()
-
-
-def count_dirty() -> int:
-    """Đếm số bản ghi bẩn."""
-    with _lock:
-        conn = _get_conn()
-        try:
-            return conn.execute("SELECT COUNT(*) FROM dirty_records").fetchone()[0]
-        except Exception:
-            return 0
         finally:
             conn.close()
 
@@ -275,3 +278,126 @@ def query_table(table_name: str, limit: int = 100, offset: int = 0) -> dict:
 
 # Khởi tạo schema ngay khi module được import
 init_db()
+
+
+# ─────────────────────────────────────────────────────────────
+#  Heal Log functions
+# ─────────────────────────────────────────────────────────────
+
+def log_heal_cycle(result: dict):
+    """Ghi một chu kỳ heal vào heal_log."""
+    import json as _json
+    with _lock:
+        conn = _get_conn()
+        try:
+            conn.execute(
+                """INSERT INTO heal_log
+                   (cycle_started, cycle_finished, detected,
+                    healed_pg, healed_mysql, errors, status, detail_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    result.get("started_at", ""),
+                    result.get("finished_at", ""),
+                    result.get("total_diff", 0),
+                    result.get("healed_into_pg", 0),
+                    result.get("healed_into_mysql", 0),
+                    result.get("errors", 0),
+                    result.get("status", "ok"),
+                    _json.dumps(result.get("details", [])[:50]),  # max 50 details
+                )
+            )
+            conn.commit()
+        except Exception as e:
+            print(f"[db_local] log_heal_cycle error: {e}")
+        finally:
+            conn.close()
+
+
+def get_heal_log(limit: int = 20) -> list:
+    """Lấy lịch sử heal gần nhất."""
+    with _lock:
+        conn = _get_conn()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM heal_log ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+            return [dict(r) for r in rows]
+        except Exception:
+            return []
+        finally:
+            conn.close()
+
+
+def get_heal_stats() -> dict:
+    """Tổng hợp thống kê heal từ DB."""
+    with _lock:
+        conn = _get_conn()
+        try:
+            row = conn.execute(
+                """SELECT
+                       COUNT(*)          AS cycles,
+                       COALESCE(SUM(detected), 0)      AS total_detected,
+                       COALESCE(SUM(healed_pg), 0)     AS total_healed_pg,
+                       COALESCE(SUM(healed_mysql), 0)  AS total_healed_mysql,
+                       COALESCE(SUM(errors), 0)        AS total_errors,
+                       MAX(cycle_started)              AS last_run
+                   FROM heal_log"""
+            ).fetchone()
+            return dict(row) if row else {}
+        except Exception:
+            return {}
+        finally:
+            conn.close()
+
+
+def simulate_local_heal() -> dict:
+    """
+    LOCAL MODE: giả lập heal bằng cách phát hiện orders nào bị thiếu
+    created_at (dữ liệu không đầy đủ) và fill lại.
+    Trong local mode chỉ có 1 DB nên không có lệch giữa MySQL/PG.
+    Hàm này sẽ kiểm tra và sửa các bản ghi bị thiếu trường created_at.
+    """
+    from datetime import datetime as _dt
+    fixed = 0
+    with _lock:
+        conn = _get_conn()
+        try:
+            # Tìm các bản ghi thiếu created_at
+            rows = conn.execute(
+                "SELECT id, message_id FROM orders WHERE created_at IS NULL OR created_at = ''"
+            ).fetchall()
+            if rows:
+                now_str = _dt.now().strftime('%Y-%m-%d %H:%M:%S')
+                for row in rows:
+                    conn.execute(
+                        "UPDATE orders SET created_at = ? WHERE id = ?",
+                        (now_str, row["id"])
+                    )
+                conn.commit()
+                fixed = len(rows)
+        except Exception as e:
+            print(f"[local heal] error: {e}")
+            conn.rollback()
+        finally:
+            conn.close()
+
+    # Build result dict giống Docker mode để UI dùng chung
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    result = {
+        "started_at":       now_str,
+        "finished_at":      now_str,
+        "mysql_total":      count_orders(),
+        "pg_total":         count_orders(),
+        "missing_in_pg":    0,
+        "missing_in_mysql": 0,
+        "total_diff":       fixed,
+        "healed_into_pg":   0,
+        "healed_into_mysql":0,
+        "total_healed":     fixed,
+        "errors":           0,
+        "status":           "ok",
+        "note":             f"Local mode: đã sửa {fixed} bản ghi thiếu created_at.",
+        "details":          [],
+    }
+    log_heal_cycle(result)
+    return result

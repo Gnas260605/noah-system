@@ -1,0 +1,15 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Cài dependencies giống worker
+RUN pip install --no-cache-dir \
+    mysql-connector-python \
+    psycopg2-binary
+
+# Copy chỉ file cần thiết
+COPY auto_healer.py .
+
+ENV PYTHONUNBUFFERED=1
+
+CMD ["python", "auto_healer.py"]
