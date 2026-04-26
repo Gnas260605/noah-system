@@ -146,6 +146,7 @@ services:
       - noah_data:/app/data                      # SQLite persistence
       - ./legacy/inventory.csv:/app/legacy/inventory.csv  # Historical CSV
       - ./db/init.sql:/app/db/init.sql                     # Historical SQL
+      - ./docker-compose.yml:/app/docker-compose.yml       # Required for service control
     depends_on:
       rabbitmq:
         condition: service_healthy

@@ -382,7 +382,7 @@ def run_docker_compose(cmd_list):
         compose_file = os.path.join(root_dir, "docker-compose.yml")
         
         # LOG FOR TRANSPARENCY: User will see this in their Terminal
-        full_command = ["docker", "compose", "-f", compose_file] + cmd_list
+        full_command = ["docker", "compose", "-p", "noah-system", "-f", compose_file] + cmd_list
         print(f"[DOCKER_CONTROL] Executing: {' '.join(full_command)}")
         
         try:
@@ -429,13 +429,11 @@ def ops_service_toggle():
     if action not in ["start", "stop", "restart"]:
         return _err("Hành động không hợp lệ")
 
-    def run_toggle():
-        run_docker_compose([action, service_name])
+    # Run synchronously to ensure execution in gevent environment
+    # Most docker commands here are fast enough
+    run_docker_compose([action, service_name])
     
-    # Run in background to prevent UI block/timeout
-    threading.Thread(target=run_toggle, daemon=True).start()
-    
-    return _ok(f"Đã gửi lệnh {action} tới hệ thống {service_name}...")
+    return _ok(f"Đã thực hiện lệnh {action} tới hệ thống {service_name}...")
 
 
 @app.route("/api/ops/wipe-databases", methods=["POST"])

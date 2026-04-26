@@ -475,7 +475,7 @@ def build_snapshot(force: bool = False) -> dict:
 def ingest_csv(csv_path: str) -> dict:
     """Đọc inventory.csv, làm sạch NEGATIVE_NUMBERS, đẩy vào queue."""
     if not os.path.exists(csv_path):
-        return {"ok": False, "message": f"File không tồn tại: {csv_path}"}
+        return {"status": "error", "message": f"File không tồn tại: {csv_path}"}
 
     items = []
     seen_ids = set()
@@ -501,7 +501,7 @@ def ingest_csv(csv_path: str) -> dict:
                 if is_dirty:
                     dirty += 1
     except Exception as e:
-        return {"ok": False, "message": f"Lỗi đọc CSV: {e}"}
+        return {"status": "error", "message": f"Lỗi đọc CSV: {e}"}
 
     sent, errors = enqueue_bulk(items)
     return {

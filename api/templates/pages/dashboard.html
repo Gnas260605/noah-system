@@ -205,7 +205,7 @@
         } else {
             empty.style.display = 'none';
             let html = "";
-            snap.sales.forEach(order => {
+            data.sales.forEach(order => {
                 const safeId = order.message_id ? order.message_id.substring(0,8) : 'N/A';
                 const safePrice = order.total_price ? Number(order.total_price).toLocaleString() : '0';
                 html += `
@@ -222,6 +222,7 @@
                 `;
             });
             tbody.innerHTML = html;
+            if (window.lucide) lucide.createIcons();
         }
     };
 
