@@ -719,3 +719,105 @@ def replay_dlq() -> dict:
     except Exception as e:
         return {"status": "error", "message": f"Lỗi Replay DLQ: {str(e)}"}
 
+
+# ─────────────────────────────────────────────────────────────
+#  Module 2A: Tạo đơn hàng với trạng thái PENDING
+# ─────────────────────────────────────────────────────────────
+def create_order_pending(data: dict) -> dict:
+    """
+    Insert đơn hàng vào MySQL với status=PENDING.
+    Dùng bởi POST /api/orders (Module 2A yêu cầu).
+
+    Returns: {"order_id": <id hoặc message_id>}
+    """
+    if LOCAL_MODE:
+        # Local mode: dùng sqlite
+        _sqlite_insert(data)
+        return {"order_id": data.get("message_id")}
+
+    try:
+        import mysql.connector
+        conn = mysql.connector.connect(**MYSQL_CONFIG)
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO orders
+                   (message_id, user_id, product_id, quantity, total_price, status)
+               VALUES (%s, %s, %s, %s, %s, 'PENDING')
+               ON DUPLICATE KEY UPDATE status = status""",
+            (
+                data["message_id"],
+                data["user_id"],
+                data["product_id"],
+                data["quantity"],
+                data["total_price"],
+            ),
+        )
+        order_id = cur.lastrowid or data["message_id"]
+        conn.commit()
+        cur.close()
+        conn.close()
+        return {"order_id": order_id}
+    except Exception as e:
+        print(f"[create_order_pending] error: {e}")
+        return {"order_id": data.get("message_id")}
+
+
+# ─────────────────────────────────────────────────────────────
+#  Module 3: Aggregation – Doanh thu theo khách hàng
+# ─────────────────────────────────────────────────────────────
+def get_revenue_by_user(limit: int = 10) -> list:
+    """
+    Tính tổng doanh thu và số đơn hàng theo từng user_id từ MySQL.
+    Data Stitching: gộp dữ liệu từ MySQL (orders) và PostgreSQL (transactions).
+
+    Returns: list of {"user_id", "order_count", "total_revenue", "synced_to_finance"}
+    """
+    if LOCAL_MODE:
+        return []
+
+    try:
+        import mysql.connector
+        import psycopg2
+
+        # Lấy dữ liệu từ MySQL (orders)
+        mysql_conn = mysql.connector.connect(**MYSQL_CONFIG)
+        cur = mysql_conn.cursor(dictionary=True)
+        cur.execute(
+            """SELECT user_id,
+                      COUNT(*)          AS order_count,
+                      SUM(total_price)  AS total_revenue
+               FROM orders
+               GROUP BY user_id
+               ORDER BY total_revenue DESC
+               LIMIT %s""",
+            (limit,),
+        )
+        mysql_rows = {r["user_id"]: r for r in cur.fetchall()}
+        cur.close()
+        mysql_conn.close()
+
+        # Data Stitching: lấy danh sách user_id đã sync vào PostgreSQL
+        pg_conn = psycopg2.connect(**POSTGRES_CONFIG)
+        pg_cur = pg_conn.cursor()
+        pg_cur.execute("SELECT DISTINCT user_id FROM transactions")
+        pg_users = {row[0] for row in pg_cur.fetchall()}
+        pg_cur.close()
+        pg_conn.close()
+
+        # Ghép 2 nguồn dữ liệu
+        result = []
+        for uid, row in mysql_rows.items():
+            result.append({
+                "user_id":          uid,
+                "order_count":      int(row["order_count"]),
+                "total_revenue":    float(row["total_revenue"] or 0),
+                "synced_to_finance": uid in pg_users,  # Data Stitching
+            })
+
+        return result
+
+    except Exception as e:
+        print(f"[get_revenue_by_user] error: {e}")
+        return []
+
+

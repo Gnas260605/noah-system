@@ -1,6 +1,7 @@
-import pika, json, time, os, socket
+import pika, json, time, os, socket, random
 import mysql.connector
 import psycopg2
+from notifier import NotificationService
 
 MAX_RETRY = 3
 
@@ -32,6 +33,7 @@ class ResilientWorker:
     def __init__(self):
         self.mysql_conn = None
         self.pg_conn = None
+        self.notifier = NotificationService()
         self.reconnect_dbs()
 
     def reconnect_dbs(self):
@@ -59,12 +61,15 @@ class ResilientWorker:
         for attempt in range(MAX_RETRY):
             try:
                 start_time = time.time()
-                
+
+                # ── Giả lập thời gian xử lý thanh toán (Module 2B yêu cầu) ──
+                time.sleep(random.uniform(1, 2))
+
                 # MySQL UPSERT (Business / Operations)
                 my_cur = self.mysql_conn.cursor()
                 my_cur.execute("""
-                    INSERT INTO orders (message_id, user_id, product_id, quantity, total_price) 
-                    VALUES (%s, %s, %s, %s, %s) 
+                    INSERT INTO orders (message_id, user_id, product_id, quantity, total_price, status) 
+                    VALUES (%s, %s, %s, %s, %s, 'PENDING') 
                     ON DUPLICATE KEY UPDATE message_id = message_id
                 """, (msg_id, u_id, p_id, qty, price))
                 mysql_affected = my_cur.rowcount
@@ -90,7 +95,25 @@ class ResilientWorker:
                 else:
                     stats["processed"] += 1
                     print(f"[OK] PROCESSED Order: {msg_id} for User {u_id} ({duration:.3f}s)")
-                
+
+                    # ── Cập nhật trạng thái PENDING → SYNCED trong MySQL ────
+                    upd_cur = self.mysql_conn.cursor()
+                    upd_cur.execute(
+                        "UPDATE orders SET status = 'SYNCED' WHERE message_id = %s",
+                        (msg_id,)
+                    )
+                    self.mysql_conn.commit()
+                    upd_cur.close()
+
+                    # ── Module 3: Fire-and-Forget Notification ──────────────
+                    self.notifier.send_async({
+                        "order_id": msg_id,
+                        "user_id":  u_id,
+                        "total":    price,
+                    })
+                    print(f"[INFO] Order #{msg_id} synced. Notification sent to user_id={u_id}")
+                    # ────────────────────────────────────────────────────────
+
                 return True
 
             except (mysql.connector.Error, psycopg2.Error) as e:

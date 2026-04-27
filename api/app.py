@@ -43,6 +43,8 @@ from api.services import (
     get_heal_summary,
     fetch_dirty_records,
     replay_dlq,
+    create_order_pending,
+    get_revenue_by_user,
 )
 from api.db_local import (
     get_tables, query_table, log_audit,
@@ -170,6 +172,9 @@ def report_page():
         key=lambda x: x["count"], reverse=True
     )
     
+    # Module 3: Data Stitching – Tổng doanh thu theo khách hàng
+    revenue_by_user = get_revenue_by_user(limit=10)
+
     report = {
         "generated_at":  snap["generated_at"],
         "status":        "OK" if diff == 0 else "MISMATCH",
@@ -179,6 +184,7 @@ def report_page():
         "dlq_count":     snap["queue"].get("messages", 0) if not snap["queue"]["ok"] else 0,
         "dirty_log":     dirty_records,
         "summary":       rejection_summary[:5], # Top 5 issues
+        "revenue_by_user": revenue_by_user,     # Data Stitching (Module 3)
         "reconciliation":{
             "synced_pct": synced_pct,
             "result": f"Orders DB={mysql_count}, Finance DB={postgres_count}, Chênh lệch={diff}",
@@ -212,12 +218,71 @@ def report_data():
         "diff":           diff,
         "dlq_count":      0,
         "dirty_log":      dirty_records,
+        "revenue_by_user": get_revenue_by_user(limit=10),  # Data Stitching
         "reconciliation": {
             "synced_pct": synced_pct,
             "result":     f"Orders DB={mysql_count}, Finance DB={postgres_count}, Diff={diff}",
         },
     }
     return _ok("Report data loaded", data)
+
+
+@app.route("/api/stream/notifications")
+def stream_notifications():
+    """SSE: Đẩy notification mới nhất về dashboard dưới dạng toast realtime."""
+    def event_stream():
+        last_id = 0
+        # Lấy max id hiện tại để chỉ đẩy notifications MỚI sau khi client kết nối
+        try:
+            from api.config import POSTGRES_CONFIG
+            import psycopg2 as _pg
+            conn = _pg.connect(**POSTGRES_CONFIG)
+            cur = conn.cursor()
+            cur.execute("SELECT COALESCE(MAX(id),0) FROM notifications")
+            row = cur.fetchone()
+            if row:
+                last_id = row[0]
+            cur.close()
+            conn.close()
+        except Exception:
+            pass
+
+        try:
+            while True:
+                try:
+                    from api.config import POSTGRES_CONFIG
+                    import psycopg2 as _pg
+                    conn = _pg.connect(**POSTGRES_CONFIG)
+                    cur = conn.cursor()
+                    cur.execute(
+                        """SELECT id, order_id, user_id, total, message, created_at
+                           FROM notifications WHERE id > %s ORDER BY id ASC LIMIT 10""",
+                        (last_id,)
+                    )
+                    rows = cur.fetchall()
+                    cur.close()
+                    conn.close()
+
+                    for row in rows:
+                        nid, order_id, user_id, total, message, created_at = row
+                        payload = json.dumps({
+                            "id":         nid,
+                            "order_id":   order_id,
+                            "user_id":    str(user_id),
+                            "total":      float(total or 0),
+                            "message":    message,
+                            "created_at": created_at.strftime("%H:%M:%S") if hasattr(created_at, 'strftime') else str(created_at),
+                        }, ensure_ascii=False)
+                        yield f"data: {payload}\n\n"
+                        last_id = nid
+                except Exception:
+                    pass
+                time.sleep(2)
+        except GeneratorExit:
+            pass
+
+    return Response(event_stream(), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.route("/pipeline")
@@ -264,6 +329,41 @@ def send_order_form():
 # ─────────────────────────────────────────────────────────────
 #  JSON APIs
 # ─────────────────────────────────────────────────────────────
+
+# ── Module 2A: POST /api/orders (yêu cầu chính thức) ─────────
+@app.route("/api/orders", methods=["POST"])
+def api_create_order():
+    """
+    Endpoint chính thức Module 2A.
+    1. Validate dữ liệu đầu vào (quantity > 0).
+    2. Insert MySQL với status=PENDING.
+    3. Đẩy vào RabbitMQ.
+    4. Trả về 202 Accepted ngay lập tức.
+    """
+    body = request.get_json(silent=True) or {}
+    try:
+        uid   = int(body.get("user_id")    or random.randint(100, 999))
+        pid   = int(body.get("product_id") or 100)
+        qty   = int(body.get("quantity")   or 1)
+        price = float(body.get("total_price") or (qty * 100_000))
+
+        if qty <= 0:
+            return _err("Số lượng phải lớn hơn 0", code=400)
+
+        data = _make_order(uid, pid, qty, price)
+        order_result = create_order_pending(data)   # Bước 1: PENDING → MySQL
+        enqueue(data)                               # Bước 2: → RabbitMQ
+
+        return jsonify({
+            "message":  "Order received",
+            "order_id": order_result.get("order_id"),
+            "status":   "PENDING",
+        }), 202
+
+    except Exception as e:
+        return _err(str(e))
+
+
 @app.route("/sales", methods=["POST"])
 def create_sale():
     body = request.get_json(silent=True) or {}

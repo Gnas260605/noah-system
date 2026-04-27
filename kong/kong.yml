@@ -1,0 +1,82 @@
+_format_version: "3.0"
+_transform: true
+
+# ══════════════════════════════════════════════════════════════
+#  Kong Gateway – Declarative Config (DB-less mode)
+#  Module 4: Security & API Gateway
+#
+#  Kiến trúc:
+#    Public:    /                      → Dashboard (không cần apikey)
+#    Protected: /api/orders            → key-auth + rate-limit
+#    Protected: /report, /report/data  → key-auth + rate-limit
+# ══════════════════════════════════════════════════════════════
+
+services:
+
+  # ── Service 1: Dashboard & Static (Public – không cần auth) ──
+  # Cho phép truy cập dashboard qua :8000 vì port 5000 đã bị ẩn
+  - name: noah-dashboard-service
+    url: http://api:5000
+    routes:
+      - name: dashboard-root
+        paths:
+          - /
+        strip_path: false
+    # Không có plugins → Public access (dashboard, static files, SSE...)
+
+  # ── Service 2: Order API (Protected – cần apikey) ─────────────
+  - name: noah-orders-service
+    url: http://api:5000
+    routes:
+      - name: orders-route
+        paths:
+          - /api/orders
+        methods:
+          - POST
+        strip_path: false
+    plugins:
+      # Bắt buộc gửi header: apikey: noah-secret-key
+      - name: key-auth
+        config:
+          key_names:
+            - apikey
+          hide_credentials: true
+      # Giới hạn 10 request/phút/client
+      - name: rate-limiting
+        config:
+          minute: 10
+          policy: local
+          error_message: "Rate limit exceeded. Max 10 requests/minute."
+
+  # ── Service 3: Report API (Protected – cần apikey) ────────────
+  - name: noah-report-service
+    url: http://api:5000
+    routes:
+      - name: report-route
+        paths:
+          - /report
+        methods:
+          - GET
+        strip_path: false
+      - name: report-data-route
+        paths:
+          - /report/data
+        methods:
+          - GET
+        strip_path: false
+    plugins:
+      - name: key-auth
+        config:
+          key_names:
+            - apikey
+          hide_credentials: true
+      - name: rate-limiting
+        config:
+          minute: 10
+          policy: local
+
+# ── Consumers & API Keys ──────────────────────────────────────
+consumers:
+  - username: noah-client
+    keyauth_credentials:
+      - key: noah-secret-key

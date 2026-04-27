@@ -69,8 +69,8 @@ services:
       context: ./api
       dockerfile: Dockerfile
     container_name: noah-api
-    ports:
-      - "5000:5000"
+    # ports:
+    #   - "5000:5000"   # ĐÃ ẨN – Chỉ truy cập qua Kong :8000 (Module 4 Security)
     environment:
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_QUEUE: orders
@@ -122,6 +122,13 @@ services:
       POSTGRES_PASSWORD: root
       ENVIRONMENT: docker
       TZ: Asia/Ho_Chi_Minh
+      # ── Module 3: Notification System (Email) ─────────────────
+      SMTP_HOST: smtp.gmail.com
+      SMTP_PORT: "587"
+      SMTP_USER: sang28097@gmail.com
+      SMTP_PASSWORD: "cvhz wxcg gnzz jggy"
+      NOTIFY_TO: sang28097@gmail.com
+      NOTIFICATIONS_ENABLED: "true"
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -147,21 +154,27 @@ services:
         condition: service_healthy
     restart: "no"
 
-  # ── Legacy CSV Reader (stays alive for manual trigger) ────────────────────
+  # ── Legacy Adapter – Polling Daemon (Module 1) ─────────────────────
   legacy:
     build:
       context: ./legacy
       dockerfile: Dockerfile
     container_name: noah-legacy
     environment:
-      RABBITMQ_HOST: rabbitmq
+      MYSQL_HOST: mysql
+      MYSQL_USER: root
+      MYSQL_PASSWORD: root
+      MYSQL_DATABASE: ecommerce
+      INPUT_DIR: /app/input
+      PROCESSED_DIR: /app/processed
+      POLL_INTERVAL: "10"
       TZ: Asia/Ho_Chi_Minh
     volumes:
-      - ./legacy:/app
+      - ./legacy:/app                      # Code + input + processed cùng mount
     depends_on:
-      rabbitmq:
+      mysql:
         condition: service_healthy
-    restart: "no"
+    restart: unless-stopped               # Tự động restart nếu chết
 
   # ── Auto-Healer (Module 2: Messaging & Consistency) ──────────────────────
   auto_healer:
@@ -187,6 +200,35 @@ services:
       postgres:
         condition: service_healthy
     restart: always
+
+  # ── Module 4: Kong API Gateway (DB-less mode) ────────────────────────
+  kong:
+    image: kong:3.6
+    container_name: noah-kong
+    environment:
+      KONG_DATABASE:           "off"
+      KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
+      KONG_PROXY_ACCESS_LOG:   /dev/stdout
+      KONG_ADMIN_ACCESS_LOG:   /dev/stdout
+      KONG_PROXY_ERROR_LOG:    /dev/stderr
+      KONG_ADMIN_ERROR_LOG:    /dev/stderr
+      KONG_ADMIN_LISTEN:       0.0.0.0:8001
+      KONG_PROXY_LISTEN:       0.0.0.0:8000
+      TZ: Asia/Ho_Chi_Minh
+    ports:
+      - "8000:8000"   # Proxy → gửi request qua đây
+      - "8001:8001"   # Admin API
+    volumes:
+      - ./kong/kong.yml:/etc/kong/kong.yml:ro
+    depends_on:
+      api:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+    restart: unless-stopped
 
 ##############################################################################
 volumes:
