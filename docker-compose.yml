@@ -125,9 +125,9 @@ services:
       # ── Module 3: Notification System (Email) ─────────────────
       SMTP_HOST: smtp.gmail.com
       SMTP_PORT: "587"
-      SMTP_USER: sang28097@gmail.com
-      SMTP_PASSWORD: "cvhz wxcg gnzz jggy"
-      NOTIFY_TO: sang28097@gmail.com
+      SMTP_USER: your_email@gmail.com
+      SMTP_PASSWORD: "your_app_password"
+      NOTIFY_TO: your_email@gmail.com
       NOTIFICATIONS_ENABLED: "true"
     depends_on:
       rabbitmq:
@@ -170,11 +170,11 @@ services:
       POLL_INTERVAL: "10"
       TZ: Asia/Ho_Chi_Minh
     volumes:
-      - ./legacy:/app                      # Code + input + processed cùng mount
+      - ./legacy:/app # Code + input + processed cùng mount
     depends_on:
       mysql:
         condition: service_healthy
-    restart: unless-stopped               # Tự động restart nếu chết
+    restart: unless-stopped # Tự động restart nếu chết
 
   # ── Auto-Healer (Module 2: Messaging & Consistency) ──────────────────────
   auto_healer:
@@ -206,25 +206,25 @@ services:
     image: kong:3.6
     container_name: noah-kong
     environment:
-      KONG_DATABASE:           "off"
+      KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
-      KONG_PROXY_ACCESS_LOG:   /dev/stdout
-      KONG_ADMIN_ACCESS_LOG:   /dev/stdout
-      KONG_PROXY_ERROR_LOG:    /dev/stderr
-      KONG_ADMIN_ERROR_LOG:    /dev/stderr
-      KONG_ADMIN_LISTEN:       0.0.0.0:8001
-      KONG_PROXY_LISTEN:       0.0.0.0:8000
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+      KONG_PROXY_LISTEN: 0.0.0.0:8000
       TZ: Asia/Ho_Chi_Minh
     ports:
-      - "8000:8000"   # Proxy → gửi request qua đây
-      - "8001:8001"   # Admin API
+      - "8000:8000" # Proxy → gửi request qua đây
+      - "8001:8001" # Admin API
     volumes:
       - ./kong/kong.yml:/etc/kong/kong.yml:ro
     depends_on:
       api:
         condition: service_started
     healthcheck:
-      test: ["CMD", "kong", "health"]
+      test: [ "CMD", "kong", "health" ]
       interval: 10s
       timeout: 10s
       retries: 10
